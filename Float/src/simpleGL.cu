@@ -152,6 +152,11 @@ char **pArgv = NULL;
 Cells *AllCells = NULL;
 Floats *AllFloats = NULL;
 
+GLuint float_vbo;
+struct cudaGraphicsResource *float_vbo_cuda_resource;
+void *d_float_vbo_buffer = NULL;
+
+
 ///////////////Float kernel /////////////////
 
 void initFloat(Floats *InitFloats, int node_number,int num_starting_float)
@@ -272,7 +277,7 @@ void motion(int x, int y);
 void timerEvent(int value);
 
 // Cuda functionality
-void runCuda(struct cudaGraphicsResource **vbo_resource);
+void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA);
 
 const char *sSDKsample = "simpleGL (VBO)";
 
@@ -297,13 +302,13 @@ __global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned
 
     // write output vertex
  // pos[y*width+x] = make_float4(u, w, v, 1.0f);  (x,z,y,alpha);
-    pos[y*width+x] = make_float4(u, 0.5f, v, 1.0f);
+
 
     if(CAMode ==0){ //vonneuman
-
+    	  pos[y*width+x] = make_float4(u, 0.5f, v, 1.0f);
 
 	}else {
-
+		  pos[y*width+x] = make_float4(u, 1.0f, v, 1.0f);
 
 	}
 }
@@ -356,10 +361,10 @@ int main(int argc, char **argv)
 
 	// create VBO
 	createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
-
+	createVBO(&float_vbo, &float_vbo_cuda_resource, cudaGraphicsMapFlagsWriteDiscard);
 	// run the cuda part
-	runCuda(&cuda_vbo_resource);
-
+	runCuda(&cuda_vbo_resource,0);
+	runCuda(&float_vbo_cuda_resource,1);
 	// start rendering mainloop
 	glutMainLoop();
 
@@ -420,6 +425,10 @@ bool initGL(int *argc, char **argv)
     glLoadIdentity();
     gluPerspective(60.0, (GLfloat)window_width / (GLfloat) window_height, 0.1, 10.0);
 
+ //   float attenuation[] = {1.0f, -0.01f, -.000001f};
+  //  glPointParameterfv(GL_POINT_DISTANCE_ATTENUATION, attenuation, 0);
+ //   glPointParameter(GL_POINT_DISTANCE_ATTENUATION,1.0f,-0.01f,-.000001f);
+  //  glEnable(GL_POINT_DISTANCE_ATTENTUATION);
     SDK_CHECK_ERROR_GL();
 
     return true;
@@ -428,10 +437,11 @@ bool initGL(int *argc, char **argv)
 ////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
 ////////////////////////////////////////////////////////////////////////////////
-void runCuda(struct cudaGraphicsResource **vbo_resource)
+void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA)
 {
     // map OpenGL buffer object for writing from CUDA
     float4 *dptr;
+
     checkCudaErrors(cudaGraphicsMapResources(1, vbo_resource, 0));
     size_t num_bytes;
     checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void **)&dptr, &num_bytes,
@@ -441,7 +451,7 @@ void runCuda(struct cudaGraphicsResource **vbo_resource)
     // execute the kernel
 	dim3 block(8, 8, 1);
 	dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
-	simple_conveyor_kernel<<< grid, block>>>(dptr, mesh_width, mesh_height,mesh_length, 0);
+	simple_conveyor_kernel<<< grid, block>>>(dptr, mesh_width, mesh_height,mesh_length, modeCA);
 
     // unmap buffer object
     checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
@@ -495,7 +505,8 @@ void display()
     sdkStartTimer(&timer);
 
     // run CUDA kernel to generate vertex positions
-    runCuda(&cuda_vbo_resource);
+    runCuda(&cuda_vbo_resource,0);
+    runCuda(&float_vbo_cuda_resource,1);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -507,6 +518,7 @@ void display()
     glRotatef(rotate_y, 0.0, 1.0, 0.0);
 
     // render from the vbo
+    glPointSize(2.0f);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glVertexPointer(4, GL_FLOAT, 0, 0);
 
@@ -514,6 +526,16 @@ void display()
     glColor3f(1.0, 0.0, 0.0);
     glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
     glDisableClientState(GL_VERTEX_ARRAY);
+
+    //draw float
+    glPointSize(2.0f);
+	glBindBuffer(GL_ARRAY_BUFFER, float_vbo);
+	glVertexPointer(4, GL_FLOAT, 0, 0);
+
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glColor3f(0.0, 1.0, 0.0);
+	glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
+	glDisableClientState(GL_VERTEX_ARRAY);
 
     glutSwapBuffers();
 
@@ -540,6 +562,12 @@ void cleanup()
     {
         deleteVBO(&vbo, cuda_vbo_resource);
     }
+
+    if (float_vbo)
+	{
+		deleteVBO(&float_vbo, float_vbo_cuda_resource);
+	}
+
 
     // cudaDeviceReset causes the driver to clean up all state. While
     // not mandatory in normal operation, it is good practice.  It is also

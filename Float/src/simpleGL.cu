@@ -44,9 +44,55 @@
 #include <vector_types.h>
 
 #include "kernel.cu"
+
 #define MAX_EPSILON_ERROR 10.0f
 #define THRESHOLD          0.30f
 #define REFRESH_DELAY     10 //ms
+
+////////////////////// struct
+typedef struct
+{
+	int x;
+	int y;
+	int z;
+}Direction;
+
+struct Position {
+    int x;
+    int y;
+    int z;
+};
+
+//float state
+#define NORMAL 1
+#define DRIFT 2
+
+typedef struct {
+	float pressure;
+	float salinity;
+	float temperature;
+}FloatMeasurement;
+
+typedef struct {
+	//date date
+	Position FloatPos; //presure
+	FloatMeasurement *measure;
+}FloatTrajectoryPoint;
+
+typedef struct{
+	int id;
+	int floatState;//NORMAL |
+	FloatTrajectoryPoint *trajectory;
+}Floats;
+
+typedef struct{
+	float temperature;
+	float height; //presure
+	float salinity;
+	//velocity
+	//force
+	Position CellPos;//position
+}Cells;
 
 ////////////////////////////////////////////////////////////////////////////////
 // constants
@@ -56,6 +102,23 @@ const unsigned int window_height = 512;
 const unsigned int mesh_width    = 256;
 const unsigned int mesh_height   = 256;
 const unsigned int mesh_length   = 256;
+
+int MAXX=256;
+int MAXY=256;
+int MAXZ=128;
+
+int CELLSIZEX=1.0;
+int CELLSIZEY=1.0;
+int CELLSIZEZ=1.0;
+
+/*
+#define DT     0.09f     // Delta T for interative solver
+#define VIS    0.0025f   // Viscosity constant  //do nhot
+#define FORCE (5.8f*DIM) // Force scale factor
+#define FR     4         // Force update radius
+*/
+
+
 // vbo variables
 GLuint vbo;
 struct cudaGraphicsResource *cuda_vbo_resource;
@@ -84,6 +147,112 @@ int *pArgc = NULL;
 char **pArgv = NULL;
 
 #define MAX(a,b) ((a > b) ? a : b)
+
+////////////////// bien toan cuc luu tru thong tin
+Cells *AllCells = NULL;
+Floats *AllFloats = NULL;
+
+///////////////Float kernel /////////////////
+
+void initFloat(Floats *InitFloats, int node_number,int num_starting_float)
+{
+	int node;
+
+	int startingNode[num_starting_float];
+
+	for (int i = 0; i < node_number; i++)
+	{
+		InitFloats[i].floatState = NORMAL;
+	}
+
+	for (int i = 0; i < num_starting_float; i++)
+	{
+	    startingNode[i] = -1;
+	}
+
+	srand(time(NULL));
+
+	for (int i = 0; i < num_starting_float; i++)
+	{
+
+	    while(1)
+	    {
+			bool fired = false;
+				node = rand() % node_number;
+			for (int j = 0; j < i; j++)
+			{
+				if (startingNode[j] == node)
+				{
+				fired = true;
+				break;
+				}
+			}
+			if (fired == false)
+			{
+			   startingNode[i] = node;
+			   break;
+			}
+	    }
+	    InitFloats[node].floatState = DRIFT;
+	}
+}
+
+//-------------------------------------------------------------------------------------------
+/**   Version 1.0
+***** One cell fired if one of its neighbor is fired. If it fired, it changes to ash. If it is ash, it will become empty.
+*****
+*/
+/*
+__device__ FloatState computeStateFloat(FloatState *nowState_d, int nodeIndex, canaux *channels_d, curandState* devState_d)
+{
+	FloatState myState;
+
+	myState = nowState_d[nodeIndex];
+
+	//Checking its neighbours
+	int nbIn = channels_d[nodeIndex].nbIn;
+
+	if (myState.treeState == NORMAL)
+	{
+	   int nodeIn;
+	   for (int i = 0; i < nbIn; i++)
+	   {
+     	    	nodeIn = channels_d[nodeIndex].read[i].node;
+
+	    	if (nowState_d[nodeIn].treeState == FIRED)
+	    	{
+		    myState.treeState = FIRED;
+		    break;
+	    	}
+	   }
+	}
+	else if (myState.treeState == FIRED)
+	{
+	   myState.treeState = ASH;
+	}else if (myState.treeState == ASH)
+	{
+	   myState.treeState = EMPTY;
+	}
+	return myState;
+}
+
+/**
+*This function the changing the state of each cell of the  grid
+*
+*/
+
+/*
+__global__ void stepStateFloat(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number, curandState *devStates)
+{
+
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	if (idx < node_number)
+	{
+	    nextState_d[idx] = computeStateForest(nowState_d, idx, channels_d, devStates);
+	}
+}
+*/
 
 ////////////////////////////////////////////////////////////////////////////////
 // declaration, forward
@@ -142,10 +311,7 @@ __global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned
 void launch_kernel(float4 *pos, unsigned int mesh_width,
                    unsigned int mesh_height, unsigned int mesh_length,int CAMode)
 {
-    // execute the kernel
-    dim3 block(8, 8, 1);
-    dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
-    simple_conveyor_kernel<<< grid, block>>>(pos, mesh_width, mesh_height,mesh_length, CAMode);
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -158,7 +324,6 @@ int main(int argc, char **argv)
     pArgv = argv;
 
     setenv ("DISPLAY", ":0", 0);
-
 
 	sdkCreateTimer(&timer);
 
@@ -260,7 +425,6 @@ bool initGL(int *argc, char **argv)
     return true;
 }
 
-
 ////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
 ////////////////////////////////////////////////////////////////////////////////
@@ -275,11 +439,9 @@ void runCuda(struct cudaGraphicsResource **vbo_resource)
     //printf("CUDA mapped VBO: May access %ld bytes\n", num_bytes);
 
     // execute the kernel
-    //    dim3 block(8, 8, 1);
-    //    dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
-    //    kernel<<< grid, block>>>(dptr, mesh_width, mesh_height, g_fAnim);
-
-    launch_kernel(dptr, mesh_width, mesh_height,mesh_length,0);  //CA mode 0 = voneuman
+	dim3 block(8, 8, 1);
+	dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
+	simple_conveyor_kernel<<< grid, block>>>(dptr, mesh_width, mesh_height,mesh_length, 0);
 
     // unmap buffer object
     checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));

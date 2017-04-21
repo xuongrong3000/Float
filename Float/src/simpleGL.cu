@@ -1,12 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////
 //
-// Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
 //
-// Please refer to the NVIDIA end user license agreement (EULA) associated
-// with this source code for terms and conditions that govern your use of
-// this software. Any use, reproduction, disclosure, or distribution of
-// this software and related documentation outside the terms of the EULA
-// is strictly prohibited.
 //
 ////////////////////////////////////////////////////////////////////////////
 
@@ -31,23 +25,9 @@
 #include <string.h>
 #include <math.h>
 
-#ifdef _WIN32
-#  define WINDOWS_LEAN_AND_MEAN
-#  define NOMINMAX
-#  include <windows.h>
-#endif
-
 // OpenGL Graphics includes
-#include <helper_gl.h>
-#if defined (__APPLE__) || defined(MACOSX)
-  #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  #include <GLUT/glut.h>
-  #ifndef glutCloseFunc
-  #define glutCloseFunc glutWMCloseFunc
-  #endif
-#else
+#include <GL/glew.h>
 #include <GL/freeglut.h>
-#endif
 
 // includes, cuda
 #include <cuda_runtime.h>
@@ -63,6 +43,7 @@
 
 #include <vector_types.h>
 
+#include "kernel.cu"
 #define MAX_EPSILON_ERROR 10.0f
 #define THRESHOLD          0.30f
 #define REFRESH_DELAY     10 //ms
@@ -74,7 +55,7 @@ const unsigned int window_height = 512;
 
 const unsigned int mesh_width    = 256;
 const unsigned int mesh_height   = 256;
-
+const unsigned int mesh_length   = 256;
 // vbo variables
 GLuint vbo;
 struct cudaGraphicsResource *cuda_vbo_resource;
@@ -106,7 +87,6 @@ char **pArgv = NULL;
 
 ////////////////////////////////////////////////////////////////////////////////
 // declaration, forward
-bool runTest(int argc, char **argv, char *ref_file);
 void cleanup();
 
 // GL functionality
@@ -124,8 +104,6 @@ void timerEvent(int value);
 
 // Cuda functionality
 void runCuda(struct cudaGraphicsResource **vbo_resource);
-void runAutoTest(int devID, char **argv, char *ref_file);
-void checkResultCuda(int argc, char **argv, const GLuint &vbo);
 
 const char *sSDKsample = "simpleGL (VBO)";
 
@@ -133,11 +111,11 @@ const char *sSDKsample = "simpleGL (VBO)";
 //! Simple kernel to modify vertex positions in sine wave pattern
 //! @param data  data in global memory
 ///////////////////////////////////////////////////////////////////////////////
-__global__ void simple_vbo_kernel(float4 *pos, unsigned int width, unsigned int height, float time)
+__global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned int height,unsigned int mesh_length, int CAMode)
 {
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-
+	//z =
     // calculate uv coordinates
     float u = x / (float) width;
     float v = y / (float) height;
@@ -146,91 +124,28 @@ __global__ void simple_vbo_kernel(float4 *pos, unsigned int width, unsigned int 
 
     // calculate simple sine wave pattern
     float freq = 4.0f;
-    float w = sinf(u*freq + time) * cosf(v*freq + time) * 0.5f;
+  //  float w = sinf(u*freq + time) * cosf(v*freq + time) * 0.5f;
 
     // write output vertex
-    pos[y*width+x] = make_float4(u, w, v, 1.0f);
+ // pos[y*width+x] = make_float4(u, w, v, 1.0f);  (x,z,y,alpha);
+    pos[y*width+x] = make_float4(u, 0.5f, v, 1.0f);
+
+    if(CAMode ==0){ //vonneuman
+
+
+	}else {
+
+
+	}
 }
 
-
 void launch_kernel(float4 *pos, unsigned int mesh_width,
-                   unsigned int mesh_height, float time)
+                   unsigned int mesh_height, unsigned int mesh_length,int CAMode)
 {
     // execute the kernel
     dim3 block(8, 8, 1);
     dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
-    simple_vbo_kernel<<< grid, block>>>(pos, mesh_width, mesh_height, time);
-}
-
-bool checkHW(char *name, const char *gpuType, int dev)
-{
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, dev);
-    strcpy(name, deviceProp.name);
-
-    if (!STRNCASECMP(deviceProp.name, gpuType, strlen(gpuType)))
-    {
-        return true;
-    }
-    else
-    {
-        return false;
-    }
-}
-
-int findGraphicsGPU(char *name)
-{
-    int nGraphicsGPU = 0;
-    int deviceCount = 0;
-    bool bFoundGraphics = false;
-    char firstGraphicsName[256], temp[256];
-
-    cudaError_t error_id = cudaGetDeviceCount(&deviceCount);
-
-    if (error_id != cudaSuccess)
-    {
-        printf("cudaGetDeviceCount returned %d\n-> %s\n", (int)error_id, cudaGetErrorString(error_id));
-        printf("> FAILED %s sample finished, exiting...\n", sSDKsample);
-        exit(EXIT_FAILURE);
-    }
-
-    // This function call returns 0 if there are no CUDA capable devices.
-    if (deviceCount == 0)
-    {
-        printf("> There are no device(s) supporting CUDA\n");
-        return false;
-    }
-    else
-    {
-        printf("> Found %d CUDA Capable Device(s)\n", deviceCount);
-    }
-
-    for (int dev = 0; dev < deviceCount; ++dev)
-    {
-        bool bGraphics = !checkHW(temp, (const char *)"Tesla", dev);
-        printf("> %s\t\tGPU %d: %s\n", (bGraphics ? "Graphics" : "Compute"), dev, temp);
-
-        if (bGraphics)
-        {
-            if (!bFoundGraphics)
-            {
-                strcpy(firstGraphicsName, temp);
-            }
-
-            nGraphicsGPU++;
-        }
-    }
-
-    if (nGraphicsGPU)
-    {
-        strcpy(name, firstGraphicsName);
-    }
-    else
-    {
-        strcpy(name, "this hardware");
-    }
-
-    return nGraphicsGPU;
+    simple_conveyor_kernel<<< grid, block>>>(pos, mesh_width, mesh_height,mesh_length, CAMode);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -238,32 +153,51 @@ int findGraphicsGPU(char *name)
 ////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv)
 {
-    char *ref_file = NULL;
 
     pArgc = &argc;
     pArgv = argv;
 
-#if defined(__linux__)
     setenv ("DISPLAY", ":0", 0);
-#endif
 
-    printf("%s starting...\n", sSDKsample);
 
-    if (argc > 1)
-    {
-        if (checkCmdLineFlag(argc, (const char **)argv, "file"))
-        {
-            // In this mode, we are running non-OpenGL and doing a compare of the VBO was generated correctly
-            getCmdLineArgumentString(argc, (const char **)argv, "file", (char **)&ref_file);
-        }
-    }
+	sdkCreateTimer(&timer);
 
-    printf("\n");
+    // First initialize OpenGL context, so we can properly set the GL for CUDA.
+	// This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
+	if (false == initGL(&argc, argv))
+	{
+		return false;
+	}
 
-    runTest(argc, argv, ref_file);
+	// use command-line specified CUDA device, otherwise use device with highest Gflops/s
+	if (checkCmdLineFlag(argc, (const char **)argv, "device"))
+	{
+		if (gpuGLDeviceInit(argc, (const char **)argv) == -1)
+		{
+			return false;
+		}
+	}
+	else
+	{
+		cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId());
+	}
 
-    printf("%s completed, returned %s\n", sSDKsample, (g_TotalErrors == 0) ? "OK" : "ERROR!");
-    exit(g_TotalErrors == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+	// register callbacks
+	glutDisplayFunc(display);
+	glutKeyboardFunc(keyboard);
+	glutMouseFunc(mouse);
+	glutMotionFunc(motion);
+	glutCloseFunc(cleanup);
+
+	// create VBO
+	createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
+
+	// run the cuda part
+	runCuda(&cuda_vbo_resource);
+
+	// start rendering mainloop
+	glutMainLoop();
+
 }
 
 void computeFPS()
@@ -300,7 +234,9 @@ bool initGL(int *argc, char **argv)
     glutTimerFunc(REFRESH_DELAY, timerEvent,0);
 
     // initialize necessary OpenGL extensions
-    if (! isGLVersionSupported(2,0))
+    glewInit();
+
+    if (! glewIsSupported("GL_VERSION_2_0 "))
     {
         fprintf(stderr, "ERROR: Support for necessary OpenGL extensions missing.");
         fflush(stderr);
@@ -326,78 +262,6 @@ bool initGL(int *argc, char **argv)
 
 
 ////////////////////////////////////////////////////////////////////////////////
-//! Run a simple test for CUDA
-////////////////////////////////////////////////////////////////////////////////
-bool runTest(int argc, char **argv, char *ref_file)
-{
-    // Create the CUTIL timer
-    sdkCreateTimer(&timer);
-
-    // command line mode only
-    if (ref_file != NULL)
-    {
-        // This will pick the best possible CUDA capable device
-        int devID = findCudaDevice(argc, (const char **)argv);
-
-        // create VBO
-        checkCudaErrors(cudaMalloc((void **)&d_vbo_buffer, mesh_width*mesh_height*4*sizeof(float)));
-
-        // run the cuda part
-        runAutoTest(devID, argv, ref_file);
-
-        // check result of Cuda step
-        checkResultCuda(argc, argv, vbo);
-
-        cudaFree(d_vbo_buffer);
-        d_vbo_buffer = NULL;
-    }
-    else
-    {
-        // First initialize OpenGL context, so we can properly set the GL for CUDA.
-        // This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
-        if (false == initGL(&argc, argv))
-        {
-            return false;
-        }
-
-        // use command-line specified CUDA device, otherwise use device with highest Gflops/s
-        if (checkCmdLineFlag(argc, (const char **)argv, "device"))
-        {
-            if (gpuGLDeviceInit(argc, (const char **)argv) == -1)
-            {
-                return false;
-            }
-        }
-        else
-        {
-            cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId());
-        }
-
-        // register callbacks
-        glutDisplayFunc(display);
-        glutKeyboardFunc(keyboard);
-        glutMouseFunc(mouse);
-        glutMotionFunc(motion);
-#if defined (__APPLE__) || defined(MACOSX)
-        atexit(cleanup);
-#else
-        glutCloseFunc(cleanup);
-#endif
-
-        // create VBO
-        createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
-
-        // run the cuda part
-        runCuda(&cuda_vbo_resource);
-
-        // start rendering mainloop
-        glutMainLoop();
-    }
-
-    return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
 ////////////////////////////////////////////////////////////////////////////////
 void runCuda(struct cudaGraphicsResource **vbo_resource)
@@ -415,58 +279,10 @@ void runCuda(struct cudaGraphicsResource **vbo_resource)
     //    dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
     //    kernel<<< grid, block>>>(dptr, mesh_width, mesh_height, g_fAnim);
 
-    launch_kernel(dptr, mesh_width, mesh_height, g_fAnim);
+    launch_kernel(dptr, mesh_width, mesh_height,mesh_length,0);  //CA mode 0 = voneuman
 
     // unmap buffer object
     checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
-}
-
-#ifdef _WIN32
-#ifndef FOPEN
-#define FOPEN(fHandle,filename,mode) fopen_s(&fHandle, filename, mode)
-#endif
-#else
-#ifndef FOPEN
-#define FOPEN(fHandle,filename,mode) (fHandle = fopen(filename, mode))
-#endif
-#endif
-
-void sdkDumpBin2(void *data, unsigned int bytes, const char *filename)
-{
-    printf("sdkDumpBin: <%s>\n", filename);
-    FILE *fp;
-    FOPEN(fp, filename, "wb");
-    fwrite(data, bytes, 1, fp);
-    fflush(fp);
-    fclose(fp);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Run the Cuda part of the computation
-////////////////////////////////////////////////////////////////////////////////
-void runAutoTest(int devID, char **argv, char *ref_file)
-{
-    char *reference_file = NULL;
-    void *imageData = malloc(mesh_width*mesh_height*sizeof(float));
-
-    // execute the kernel
-    launch_kernel((float4 *)d_vbo_buffer, mesh_width, mesh_height, g_fAnim);
-
-    cudaDeviceSynchronize();
-    getLastCudaError("launch_kernel failed");
-
-    checkCudaErrors(cudaMemcpy(imageData, d_vbo_buffer, mesh_width*mesh_height*sizeof(float), cudaMemcpyDeviceToHost));
-
-    sdkDumpBin2(imageData, mesh_width*mesh_height*sizeof(float), "simpleGL.bin");
-    reference_file = sdkFindFilePath(ref_file, argv[0]);
-
-    if (reference_file &&
-        !sdkCompareBin2BinFloat("simpleGL.bin", reference_file,
-                                mesh_width*mesh_height*sizeof(float),
-                                MAX_EPSILON_ERROR, THRESHOLD, pArgv[0]))
-    {
-        g_TotalErrors++;
-    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -482,6 +298,7 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
     glBindBuffer(GL_ARRAY_BUFFER, *vbo);
 
     // initialize buffer object
+  //*diep*  unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
     unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
     glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
 
@@ -561,6 +378,13 @@ void cleanup()
     {
         deleteVBO(&vbo, cuda_vbo_resource);
     }
+
+    // cudaDeviceReset causes the driver to clean up all state. While
+    // not mandatory in normal operation, it is good practice.  It is also
+    // needed to ensure correct operation when the application is being
+    // profiled. Calling cudaDeviceReset causes all profile data to be
+    // flushed before the application exits
+    cudaDeviceReset();
 }
 
 
@@ -572,12 +396,10 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     switch (key)
     {
         case (27) :
-            #if defined(__APPLE__) || defined(MACOSX)
-                exit(EXIT_SUCCESS);
-            #else
+
                 glutDestroyWindow(glutGetWindow());
                 return;
-            #endif
+
     }
 }
 
@@ -617,40 +439,4 @@ void motion(int x, int y)
 
     mouse_old_x = x;
     mouse_old_y = y;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Check if the result is correct or write data to file for external
-//! regression testing
-////////////////////////////////////////////////////////////////////////////////
-void checkResultCuda(int argc, char **argv, const GLuint &vbo)
-{
-    if (!d_vbo_buffer)
-    {
-        checkCudaErrors(cudaGraphicsUnregisterResource(cuda_vbo_resource));
-
-        // map buffer object
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        float *data = (float *) glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
-
-        // check result
-        if (checkCmdLineFlag(argc, (const char **) argv, "regression"))
-        {
-            // write file for regression test
-            sdkWriteFile<float>("./data/regression.dat",
-                                data, mesh_width * mesh_height * 3, 0.0, false);
-        }
-
-        // unmap GL buffer object
-        if (!glUnmapBuffer(GL_ARRAY_BUFFER))
-        {
-            fprintf(stderr, "Unmap buffer failed.\n");
-            fflush(stderr);
-        }
-
-        checkCudaErrors(cudaGraphicsGLRegisterBuffer(&cuda_vbo_resource, vbo,
-                                                     cudaGraphicsMapFlagsWriteDiscard));
-
-        SDK_CHECK_ERROR_GL();
-    }
 }

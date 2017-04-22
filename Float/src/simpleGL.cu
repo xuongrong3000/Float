@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <vector>
 
 // OpenGL Graphics includes
 #include <GL/glew.h>
@@ -45,10 +46,14 @@
 
 #include "kernel.cu"
 
+
+#include <boost/multi_array.hpp>
+#include <cassert>
 #define MAX_EPSILON_ERROR 10.0f
 #define THRESHOLD          0.30f
 #define REFRESH_DELAY     10 //ms
 
+using namespace std;
 ////////////////////// struct
 typedef struct
 {
@@ -66,6 +71,8 @@ struct Position {
 //float state
 #define NORMAL 1
 #define DRIFT 2
+#define CA_VON_NEUMANN 0
+#define CA_MOORE 1
 
 typedef struct {
 	float pressure;
@@ -76,14 +83,14 @@ typedef struct {
 typedef struct {
 	//date date
 	Position FloatPos; //presure
-	FloatMeasurement *measure;
+	vector<FloatMeasurement> measure;
 }FloatTrajectoryPoint;
 
 typedef struct{
 	int id;
 	int floatState;//NORMAL |
-	FloatTrajectoryPoint *trajectory;
-}Floats;
+	vector<FloatTrajectoryPoint> trajectory;
+}FloatType;
 
 typedef struct{
 	float temperature;
@@ -92,7 +99,7 @@ typedef struct{
 	//velocity
 	//force
 	Position CellPos;//position
-}Cells;
+}CellType;
 
 ////////////////////////////////////////////////////////////////////////////////
 // constants
@@ -149,17 +156,42 @@ char **pArgv = NULL;
 #define MAX(a,b) ((a > b) ? a : b)
 
 ////////////////// bien toan cuc luu tru thong tin
-Cells *AllCells = NULL;
-Floats *AllFloats = NULL;
+CellType *AllCells = NULL;
+FloatType *AllFloats = NULL;
+typedef boost::multi_array<CellType, 3> array3DCellType;
+typedef array3DCellType::index a3D_index;
+array3DCellType Cells(boost::extents[3][4][2]);
 
 GLuint float_vbo;
 struct cudaGraphicsResource *float_vbo_cuda_resource;
 void *d_float_vbo_buffer = NULL;
 
+vector<CellType> getNeighbors(int CAmode,CellType aCell)
+{
+	vector<CellType> result;
+	if(CAmode == CA_VON_NEUMANN){
+		if(aCell.CellPos.x>0)
+
+		if(aCell.CellPos.x>0)
+		if(aCell.CellPos.x>0)
+		if(aCell.CellPos.x>0)
+		if(aCell.CellPos.x>0)
+		if(aCell.CellPos.x>0)
+			return result;
+	}else if(CAmode == CA_MOORE){
+		if(aCell.CellPos.x>0)
+		if(aCell.CellPos.x>0)
+		if(aCell.CellPos.x>0)
+			return result;
+	}
+	return result;
+}
+//void initCells(CellType *Cells);
+
 
 ///////////////Float kernel /////////////////
 
-void initFloat(Floats *InitFloats, int node_number,int num_starting_float)
+void initFloat(FloatType *InitFloats, int node_number,int num_starting_float)
 {
 	int node;
 
@@ -201,6 +233,7 @@ void initFloat(Floats *InitFloats, int node_number,int num_starting_float)
 	    InitFloats[node].floatState = DRIFT;
 	}
 }
+
 
 //-------------------------------------------------------------------------------------------
 /**   Version 1.0
@@ -254,10 +287,41 @@ __global__ void stepStateFloat(FloatState *nowState_d, FloatState *nextState_d, 
 
 	if (idx < node_number)
 	{
-	    nextState_d[idx] = computeStateForest(nowState_d, idx, channels_d, devStates);
+	    nextState_d[idx] = computeStateFloat(nowState_d, idx, channels_d, devStates);
 	}
 }
 */
+
+// This method adds constant force vectors to the velocity field
+// stored in 'v' according to v(x,t+1) = v(x,t) + dt * f.
+__global__ void addForces_k(int dx, int dy, int spx, int spy, float fx, float fy, int r, size_t pitch);
+
+// This method performs the velocity advection step, where we
+// trace velocity vectors back in time to update each grid cell.
+// That is, v(x,t+1) = v(p(x,-dt),t). Here we perform bilinear
+// interpolation in the velocity space.
+__global__ void advectVelocity_k(float *vx, float *vy,int dx, int pdx, int dy, float dt, int lb);
+
+// This method performs velocity diffusion and forces mass conservation
+// in the frequency domain. The inputs 'vx' and 'vy' are complex-valued
+// arrays holding the Fourier coefficients of the velocity field in
+// X and Y. Diffusion in this space takes a simple form described as:
+// v(k,t) = v(k,t) / (1 + visc * dt * k^2), where visc is the viscosity,
+// and k is the wavenumber. The projection step forces the Fourier
+// velocity vectors to be orthogonal to the wave wave vectors for each
+// wavenumber: v(k,t) = v(k,t) - ((k dot v(k,t) * k) / k^2.     cData *vy,
+__global__ void diffuseProject_k( int dx, int dy, float dt,float visc, int lb);
+
+// This method updates the velocity field 'v' using the two complex
+// arrays from the previous step: 'vx' and 'vy'. Here we scale the
+// real components by 1/(dx*dy) to account for an unnormalized FFT.
+__global__ void updateVelocity_k(float *vx, float *vy,int dx, int pdx, int dy, int lb, size_t pitch);
+
+// This method updates the particles by moving particle positions
+// according to the velocity field and time step. That is, for each
+// particle: p(t+1) = p(t) + dt * v(p(t)).
+__global__ void advectParticles_k(int dx, int dy,float dt, int lb, size_t pitch);
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // declaration, forward
@@ -297,7 +361,7 @@ __global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned
     v = v*2.0f - 1.0f;
 
     // calculate simple sine wave pattern
-    float freq = 4.0f;
+  //  float freq = 4.0f;
   //  float w = sinf(u*freq + time) * cosf(v*freq + time) * 0.5f;
 
     // write output vertex
@@ -363,8 +427,8 @@ int main(int argc, char **argv)
 	createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
 	createVBO(&float_vbo, &float_vbo_cuda_resource, cudaGraphicsMapFlagsWriteDiscard);
 	// run the cuda part
-	runCuda(&cuda_vbo_resource,0);
-	runCuda(&float_vbo_cuda_resource,1);
+	//runCuda(&cuda_vbo_resource,0);
+	//runCuda(&float_vbo_cuda_resource,1);
 	// start rendering mainloop
 	glutMainLoop();
 

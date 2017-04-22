@@ -54,6 +54,7 @@
 #define REFRESH_DELAY     10 //ms
 
 using namespace std;
+using namespace boost;
 ////////////////////// struct
 typedef struct
 {
@@ -126,10 +127,7 @@ int CELLSIZEZ=1.0;
 */
 
 
-// vbo variables
-GLuint vbo;
-struct cudaGraphicsResource *cuda_vbo_resource;
-void *d_vbo_buffer = NULL;
+
 
 float g_fAnim = 0.0;
 
@@ -155,30 +153,53 @@ char **pArgv = NULL;
 
 #define MAX(a,b) ((a > b) ? a : b)
 
-////////////////// bien toan cuc luu tru thong tin
-CellType *AllCells = NULL;
-FloatType *AllFloats = NULL;
-typedef boost::multi_array<CellType, 3> array3DCellType;
-typedef array3DCellType::index a3D_index;
-array3DCellType Cells(boost::extents[3][4][2]);
+// vbo variables
+GLuint vbo;
+struct cudaGraphicsResource *cuda_vbo_resource;
+void *d_vbo_buffer = NULL;
 
 GLuint float_vbo;
 struct cudaGraphicsResource *float_vbo_cuda_resource;
 void *d_float_vbo_buffer = NULL;
 
+////////////////// bien toan cuc luu tru thong tin
+CellType *AllCells = NULL;
+FloatType *AllFloats = NULL;
+
+typedef multi_array<CellType, 3> array3DCellType;
+typedef array3DCellType::index a3D_index;
+array3DCellType Cells(extents[MAXX][MAXY][MAXZ]);
+
 vector<CellType> getNeighbors(int CAmode,CellType aCell)
 {
 	vector<CellType> result;
-	if(CAmode == CA_VON_NEUMANN){
-		if(aCell.CellPos.x>0)
-
-		if(aCell.CellPos.x>0)
-		if(aCell.CellPos.x>0)
-		if(aCell.CellPos.x>0)
-		if(aCell.CellPos.x>0)
-		if(aCell.CellPos.x>0)
+	if(CAmode == CA_VON_NEUMANN){ //6 rules
+		if(aCell.CellPos.x>0){
+			array<a3D_index,3> idx = {{aCell.CellPos.x-1,aCell.CellPos.y,aCell.CellPos.z}};
+			result.push_back(Cells(idx)) ;
+		}
+		if(aCell.CellPos.x<MAXX-1){
+			array<a3D_index,3> idx = {{aCell.CellPos.x+1,aCell.CellPos.y,aCell.CellPos.z}};
+			result.push_back(Cells(idx)) ;
+		}
+		if(aCell.CellPos.y>0){
+			array<a3D_index,3> idx = {{aCell.CellPos.x,aCell.CellPos.y-1,aCell.CellPos.z}};
+			result.push_back(Cells(idx)) ;
+		}
+		if(aCell.CellPos.y<MAXY-1){
+			array<a3D_index,3> idx = {{aCell.CellPos.x,aCell.CellPos.y+1,aCell.CellPos.z}};
+			result.push_back(Cells(idx)) ;
+		}
+		if(aCell.CellPos.z>0){
+			array<a3D_index,3> idx = {{aCell.CellPos.x,aCell.CellPos.y,aCell.CellPos.z-1}};
+			result.push_back(Cells(idx)) ;
+		}
+		if(aCell.CellPos.z<MAXZ-1){
+			array<a3D_index,3> idx = {{aCell.CellPos.x,aCell.CellPos.y,aCell.CellPos.z+1}};
+			result.push_back(Cells(idx)) ;
+		}
 			return result;
-	}else if(CAmode == CA_MOORE){
+	}else if(CAmode == CA_MOORE){ //28 rules
 		if(aCell.CellPos.x>0)
 		if(aCell.CellPos.x>0)
 		if(aCell.CellPos.x>0)
@@ -186,8 +207,37 @@ vector<CellType> getNeighbors(int CAmode,CellType aCell)
 	}
 	return result;
 }
-//void initCells(CellType *Cells);
+void initCells(){
 
+	  for(a3D_index i = 0; i != MAXX; ++i)
+	    for(a3D_index j = 0; j != MAXY; ++j)
+	      for(a3D_index k = 0; k != MAXZ; ++k)
+	        {
+	    	  Position temp;
+	    	  temp.x = i/MAXX ;
+	    	  temp.y = j/MAXY ;
+	    	  temp.z = k/MAXZ ;
+	    	  Cells[i][j][k].CellPos = temp;
+	        }
+}
+
+/*
+__global__ void stepCell(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number, curandState *devStates)
+{
+
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	if (idx < node_number)
+	{
+	    nextState_d[idx] = computeCell(nowState_d, idx, channels_d, devStates);
+	}
+}
+
+__device__ void computeCell(FloatState *nowState_d, int nodeIndex, canaux *channels_d, curandState* devState_d)
+{
+
+}
+*/
 
 ///////////////Float kernel /////////////////
 
@@ -360,6 +410,8 @@ __global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned
     u = u*2.0f - 1.0f;
     v = v*2.0f - 1.0f;
 
+    if (x% 5 == 0|| y%3 ==0)
+    	return ;
     // calculate simple sine wave pattern
   //  float freq = 4.0f;
   //  float w = sinf(u*freq + time) * cosf(v*freq + time) * 0.5f;
@@ -377,11 +429,6 @@ __global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned
 	}
 }
 
-void launch_kernel(float4 *pos, unsigned int mesh_width,
-                   unsigned int mesh_height, unsigned int mesh_length,int CAMode)
-{
-
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
@@ -535,7 +582,7 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
 
     // initialize buffer object
   //*diep*  unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
-    unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
+    unsigned int size = MAXX * MAXY * MAXZ * 4 * sizeof(float);
     glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);

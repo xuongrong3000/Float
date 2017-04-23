@@ -33,7 +33,7 @@
 									<listOptionValue builtIn="false" value="&quot;${cuda_samples_dir:/Float}/common/inc&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/Float}&quot;"/>
 								</option>
-								<option id="nvcc.compiler.cpp11option.1992441672" superClass="nvcc.compiler.cpp11option" value="true" valueType="boolean"/>
+								<option id="nvcc.compiler.cpp11option.1992441672" name="Enable C++11 support (-std=c++11)" superClass="nvcc.compiler.cpp11option" value="true" valueType="boolean"/>
 								<inputType id="nvcc.compiler.input.cu.352313708" superClass="nvcc.compiler.input.cu"/>
 								<inputType id="nvcc.compiler.input.cpp.804795147" superClass="nvcc.compiler.input.cpp"/>
 								<inputType id="nvcc.compiler.input.c.693385288" superClass="nvcc.compiler.input.c"/>

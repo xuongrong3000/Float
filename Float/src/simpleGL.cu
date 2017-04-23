@@ -26,6 +26,7 @@
 #include <math.h>
 #include <vector>
 #include <array>
+#include <iostream>
 // OpenGL Graphics includes
 #include <GL/glew.h>
 #include <GL/freeglut.h>
@@ -60,13 +61,11 @@ typedef struct
 {
 	int x;
 	int y;
-	int z;
 }Direction;
 
 struct Position {
-    int x;
-    int y;
-    int z;
+    float x;
+    float y;
 };
 
 //float state
@@ -117,11 +116,9 @@ const unsigned int mesh_length   = 256;
 
 int MAXX=128;
 int MAXY=128;
-int MAXZ=128;
 
 int CELLSIZEX=1.0;
 int CELLSIZEY=1.0;
-int CELLSIZEZ=1.0;
 
 /*
 #define DT     0.09f     // Delta T for interative solver
@@ -148,7 +145,6 @@ float avgFPS = 0.0f;
 unsigned int frameCount = 0;
 
 
-
 int *pArgc = NULL;
 char **pArgv = NULL;
 
@@ -169,41 +165,18 @@ FloatType *AllFloats = NULL;
 
 CellType *AllCells = NULL;
 
-typedef multi_array<long, 3> array3DCellType;
-typedef array3DCellType::index a3D_index;
-array3DCellType Cells(extents[MAXX][MAXY][MAXZ]);
-
-std::array<std::vector<long>, 2097152> neighbor_index;
+std::array<std::vector<long>, 16384> neighbor_index;
+/*
 vector<CellType> getNeighbors(int CAmode,CellType aCell)
 {
 	vector<CellType> result;
 	if(CAmode == CA_VON_NEUMANN){ //6 rules
-		/*
-		if(aCell.CellPos.x>0){
-			array<long,3> idx = {{aCell.CellPos.x-1,aCell.CellPos.y,aCell.CellPos.z}};
-			result.push_back(Cells(idx)) ;
-		}
-		if(aCell.CellPos.x<MAXX-1){
-			array<long,3> idx = {{aCell.CellPos.x+1,aCell.CellPos.y,aCell.CellPos.z}};
-			result.push_back(Cells(idx)) ;
-		}
-		if(aCell.CellPos.y>0){
-			array<long,3> idx = {{aCell.CellPos.x,aCell.CellPos.y-1,aCell.CellPos.z}};
-			result.push_back(Cells(idx)) ;
-		}
-		if(aCell.CellPos.y<MAXY-1){
-			array<long,3> idx = {{aCell.CellPos.x,aCell.CellPos.y+1,aCell.CellPos.z}};
-			result.push_back(Cells(idx)) ;
-		}
-		if(aCell.CellPos.z>0){
-			array<long,3> idx = {{aCell.CellPos.x,aCell.CellPos.y,aCell.CellPos.z-1}};
-			result.push_back(Cells(idx)) ;
-		}
-		if(aCell.CellPos.z<MAXZ-1){
-			array<long,3> idx = {{aCell.CellPos.x,aCell.CellPos.y,aCell.CellPos.z+1}};
-			result.push_back(Cells(idx)) ;
-		}
-		*/
+		//left(x) = (x - 1) % M
+		//result.pushback(AllCells);
+		//right(x) = (x + 1) % M
+		//above(x) = (x - M) % (M * N)
+		//below(x) = (x + M) % (M * N)
+
 			return result;
 	}else if(CAmode == CA_MOORE){ //26 rules
 		if(aCell.CellPos.x>0)
@@ -212,28 +185,53 @@ vector<CellType> getNeighbors(int CAmode,CellType aCell)
 			return result;
 	}
 	return result;
-}
+}*/
 void initCell2D(){
-
 	AllCells = (CellType*) malloc(MAXX*MAXY* sizeof (CellType));
 	long tempid=0;
 
-	  for(int k = 0; k < MAXZ; ++k)
-	    for(int j = 0; j < MAXY; ++j)
+	    for(int j = 0; j < MAXY; ++j){
 	      for(int i = 0; i < MAXX; ++i)
 	        {
 	    	  Position temp;
-	    	  temp.x = i/MAXX ;
-	    	  temp.y = j/MAXY ;
-	    	  temp.z = k/MAXZ ;
-	    	  AllCells[i+MAXY*(j+MAXZ*k)].id = tempid;
-	    	  AllCells[i+MAXY*(j+MAXZ*k)].CellPos = temp;
+	    	  temp.x = (float)i/MAXX ;
+	    	  temp.y = (float)j/MAXY ;
+
+	    	  AllCells[i+MAXY*j].id = tempid;
+	    	  AllCells[i+MAXY*j].CellPos = temp;
 	    	  tempid++;
 	    	  //Flat[x + HEIGHT* (y + WIDTH* z)]
 //	    	  The algorithm is mostly the same. If you have a 3D array Original[HEIGHT, WIDTH, DEPTH] then you could turn it into Flat[HEIGHT * WIDTH * DEPTH] by
 //	    	  Flat[x + WIDTH * (y + DEPTH * z)] = Original[x, y, z]
 	        }
+	    }
+	   // cout << " tempid = " <<tempid;
+	    if(true){ //4 neighbor 2D
+	    	vector<long> neighbor ;
+	    	for(int j = 0; j < MAXY; ++j){
+			   for(int i = 0; i < MAXX; ++i)
+				{
+				   if (i>0)//left(x) = (x - 1) % M
+					   neighbor.push_back(AllCells[((i+j*MAXX)-1)%MAXX].id);
+				   if (i<MAXX-1)//right(x) = (x + 1) % M
+					   neighbor.push_back(AllCells[((i+j*MAXX)+1)%MAXX].id);
+				   if (j>0)//above(x) = (x - M) % (M * N)
+					   neighbor.push_back(AllCells[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id);
+				   if (j<MAXY-1)//below(x) = (x + M) % (M * N)
+					   neighbor.push_back(AllCells[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id);
+				   neighbor_index[i+(j*MAXX)] = neighbor;
+				   neighbor.clear();
+		/*		   if(i==2&&j==0){
+					   cout << "\ni+j*MAXX= " << i+j*MAXX << " AllCells id= " <<AllCells[(i+j*MAXX)].id << " neightbors: "
+							   << AllCells[((i+j*MAXX)-1)%MAXX].id <<","<< AllCells[((i+j*MAXX)+1)%MAXX].id <<","
+							   << AllCells[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id <<","<< AllCells[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id;
+
+				   }*/
+				}
+	    	}
+	    }
 }
+
 /*
 void initCells(){
 
@@ -455,7 +453,6 @@ __global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned
     // write output vertex
  // pos[y*width+x] = make_float4(u, w, v, 1.0f);  (x,z,y,alpha);
 
-
     if(CAMode ==0){ //vonneuman
     	  pos[y*width+x] = make_float4(u, 0.5f, v, 1.0f);
 
@@ -479,7 +476,17 @@ int main(int argc, char **argv)
 
 	sdkCreateTimer(&timer);
 
-	initCells();
+	initCell2D();
+
+	cout<<" id = 551 [x,y]= [" << AllCells[551].CellPos.x<<","<<AllCells[551].CellPos.y<< "]";
+    cout<< "\n neighbor: ";
+    /*
+    vector<long> temp = neighbor_index[551];
+    for (vector<long>::iterator it = temp.begin() ; it != temp.end(); ++it){
+    	cout << ' ' << *it;
+    }
+*/
+
     // First initialize OpenGL context, so we can properly set the GL for CUDA.
 	// This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
 	if (false == initGL(&argc, argv))
@@ -533,7 +540,7 @@ void computeFPS()
     }
 
     char fps[256];
-    sprintf(fps, "Cuda GL Interop (VBO): %3.1f fps (Max 100Hz)", avgFPS);
+    sprintf(fps, "Cuda GL Float: %3.1f fps (Max 100Hz)", avgFPS);
     glutSetWindowTitle(fps);
 }
 
@@ -545,7 +552,7 @@ bool initGL(int *argc, char **argv)
     glutInit(argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE);
     glutInitWindowSize(window_width, window_height);
-    glutCreateWindow("Cuda GL Interop (VBO)");
+    glutCreateWindow("Cuda GL Float");
     glutDisplayFunc(display);
     glutKeyboardFunc(keyboard);
     glutMotionFunc(motion);
@@ -619,7 +626,7 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
 
     // initialize buffer object
   //*diep*  unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
-    unsigned int size = MAXX * MAXY * MAXZ * 4 * sizeof(float);
+    unsigned int size = mesh_width * mesh_height  * 4 * sizeof(float);
     glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);

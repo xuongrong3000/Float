@@ -25,7 +25,7 @@
 #include <string.h>
 #include <math.h>
 #include <vector>
-
+#include <array>
 // OpenGL Graphics includes
 #include <GL/glew.h>
 #include <GL/freeglut.h>
@@ -70,8 +70,10 @@ struct Position {
 };
 
 //float state
+#define NOTVALID 0
 #define NORMAL 1
 #define DRIFT 2
+
 #define CA_VON_NEUMANN 0
 #define CA_MOORE 1
 
@@ -93,13 +95,15 @@ typedef struct{
 	vector<FloatTrajectoryPoint> trajectory;
 }FloatType;
 
-typedef struct{
+typedef struct celltype{
 	float temperature;
 	float height; //presure
 	float salinity;
 	//velocity
 	//force
 	Position CellPos;//position
+	int state; //NOTVALID | NORMAL | DRIFT
+	long id;
 }CellType;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -111,8 +115,8 @@ const unsigned int mesh_width    = 256;
 const unsigned int mesh_height   = 256;
 const unsigned int mesh_length   = 256;
 
-int MAXX=256;
-int MAXY=256;
+int MAXX=128;
+int MAXY=128;
 int MAXZ=128;
 
 int CELLSIZEX=1.0;
@@ -125,9 +129,6 @@ int CELLSIZEZ=1.0;
 #define FORCE (5.8f*DIM) // Force scale factor
 #define FR     4         // Force update radius
 */
-
-
-
 
 float g_fAnim = 0.0;
 
@@ -142,11 +143,11 @@ StopWatchInterface *timer = NULL;
 // Auto-Verification Code
 int fpsCount = 0;        // FPS count for averaging
 int fpsLimit = 1;        // FPS limit for sampling
-int g_Index = 0;
+
 float avgFPS = 0.0f;
 unsigned int frameCount = 0;
-unsigned int g_TotalErrors = 0;
-bool g_bQAReadback = false;
+
+
 
 int *pArgc = NULL;
 char **pArgv = NULL;
@@ -163,43 +164,48 @@ struct cudaGraphicsResource *float_vbo_cuda_resource;
 void *d_float_vbo_buffer = NULL;
 
 ////////////////// bien toan cuc luu tru thong tin
-CellType *AllCells = NULL;
+
 FloatType *AllFloats = NULL;
 
-typedef multi_array<CellType, 3> array3DCellType;
+CellType *AllCells = NULL;
+
+typedef multi_array<long, 3> array3DCellType;
 typedef array3DCellType::index a3D_index;
 array3DCellType Cells(extents[MAXX][MAXY][MAXZ]);
 
+std::array<std::vector<long>, 2097152> neighbor_index;
 vector<CellType> getNeighbors(int CAmode,CellType aCell)
 {
 	vector<CellType> result;
 	if(CAmode == CA_VON_NEUMANN){ //6 rules
+		/*
 		if(aCell.CellPos.x>0){
-			array<a3D_index,3> idx = {{aCell.CellPos.x-1,aCell.CellPos.y,aCell.CellPos.z}};
+			array<long,3> idx = {{aCell.CellPos.x-1,aCell.CellPos.y,aCell.CellPos.z}};
 			result.push_back(Cells(idx)) ;
 		}
 		if(aCell.CellPos.x<MAXX-1){
-			array<a3D_index,3> idx = {{aCell.CellPos.x+1,aCell.CellPos.y,aCell.CellPos.z}};
+			array<long,3> idx = {{aCell.CellPos.x+1,aCell.CellPos.y,aCell.CellPos.z}};
 			result.push_back(Cells(idx)) ;
 		}
 		if(aCell.CellPos.y>0){
-			array<a3D_index,3> idx = {{aCell.CellPos.x,aCell.CellPos.y-1,aCell.CellPos.z}};
+			array<long,3> idx = {{aCell.CellPos.x,aCell.CellPos.y-1,aCell.CellPos.z}};
 			result.push_back(Cells(idx)) ;
 		}
 		if(aCell.CellPos.y<MAXY-1){
-			array<a3D_index,3> idx = {{aCell.CellPos.x,aCell.CellPos.y+1,aCell.CellPos.z}};
+			array<long,3> idx = {{aCell.CellPos.x,aCell.CellPos.y+1,aCell.CellPos.z}};
 			result.push_back(Cells(idx)) ;
 		}
 		if(aCell.CellPos.z>0){
-			array<a3D_index,3> idx = {{aCell.CellPos.x,aCell.CellPos.y,aCell.CellPos.z-1}};
+			array<long,3> idx = {{aCell.CellPos.x,aCell.CellPos.y,aCell.CellPos.z-1}};
 			result.push_back(Cells(idx)) ;
 		}
 		if(aCell.CellPos.z<MAXZ-1){
-			array<a3D_index,3> idx = {{aCell.CellPos.x,aCell.CellPos.y,aCell.CellPos.z+1}};
+			array<long,3> idx = {{aCell.CellPos.x,aCell.CellPos.y,aCell.CellPos.z+1}};
 			result.push_back(Cells(idx)) ;
 		}
+		*/
 			return result;
-	}else if(CAmode == CA_MOORE){ //28 rules
+	}else if(CAmode == CA_MOORE){ //26 rules
 		if(aCell.CellPos.x>0)
 		if(aCell.CellPos.x>0)
 		if(aCell.CellPos.x>0)
@@ -207,20 +213,50 @@ vector<CellType> getNeighbors(int CAmode,CellType aCell)
 	}
 	return result;
 }
-void initCells(){
+void initCell2D(){
 
-	  for(a3D_index i = 0; i != MAXX; ++i)
-	    for(a3D_index j = 0; j != MAXY; ++j)
-	      for(a3D_index k = 0; k != MAXZ; ++k)
+	AllCells = (CellType*) malloc(MAXX*MAXY* sizeof (CellType));
+	long tempid=0;
+
+	  for(int k = 0; k < MAXZ; ++k)
+	    for(int j = 0; j < MAXY; ++j)
+	      for(int i = 0; i < MAXX; ++i)
 	        {
 	    	  Position temp;
 	    	  temp.x = i/MAXX ;
 	    	  temp.y = j/MAXY ;
 	    	  temp.z = k/MAXZ ;
-	    	  Cells[i][j][k].CellPos = temp;
+	    	  AllCells[i+MAXY*(j+MAXZ*k)].id = tempid;
+	    	  AllCells[i+MAXY*(j+MAXZ*k)].CellPos = temp;
+	    	  tempid++;
+	    	  //Flat[x + HEIGHT* (y + WIDTH* z)]
+//	    	  The algorithm is mostly the same. If you have a 3D array Original[HEIGHT, WIDTH, DEPTH] then you could turn it into Flat[HEIGHT * WIDTH * DEPTH] by
+//	    	  Flat[x + WIDTH * (y + DEPTH * z)] = Original[x, y, z]
 	        }
 }
+/*
+void initCells(){
 
+	AllCells = (CellType*) malloc(MAXX*MAXY*MAXZ * sizeof (CellType));
+	long tempid=0;
+
+	  for(int k = 0; k < MAXZ; ++k)
+	    for(int j = 0; j < MAXY; ++j)
+	      for(int i = 0; i < MAXX; ++i)
+	        {
+	    	  Position temp;
+	    	  temp.x = i/MAXX ;
+	    	  temp.y = j/MAXY ;
+	    	  temp.z = k/MAXZ ;
+	    	  AllCells[i+MAXY*(j+MAXZ*k)].id = tempid;
+	    	  AllCells[i+MAXY*(j+MAXZ*k)].CellPos = temp;
+	    	  tempid++;
+	    	  //Flat[x + HEIGHT* (y + WIDTH* z)]
+//	    	  The algorithm is mostly the same. If you have a 3D array Original[HEIGHT, WIDTH, DEPTH] then you could turn it into Flat[HEIGHT * WIDTH * DEPTH] by
+//	    	  Flat[x + WIDTH * (y + DEPTH * z)] = Original[x, y, z]
+	        }
+}
+*/
 /*
 __global__ void stepCell(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number, curandState *devStates)
 {
@@ -443,6 +479,7 @@ int main(int argc, char **argv)
 
 	sdkCreateTimer(&timer);
 
+	initCells();
     // First initialize OpenGL context, so we can properly set the GL for CUDA.
 	// This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
 	if (false == initGL(&argc, argv))

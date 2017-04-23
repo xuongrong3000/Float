@@ -212,9 +212,9 @@ void initCell2D(){
 			   for(int i = 0; i < MAXX; ++i)
 				{
 				   if (i>0)//left(x) = (x - 1) % M
-					   neighbor.push_back(AllCells[((i+j*MAXX)-1)%MAXX].id);
+					   neighbor.push_back(AllCells[((i+j*MAXX)-1)].id);
 				   if (i<MAXX-1)//right(x) = (x + 1) % M
-					   neighbor.push_back(AllCells[((i+j*MAXX)+1)%MAXX].id);
+					   neighbor.push_back(AllCells[((i+j*MAXX)+1)].id);
 				   if (j>0)//above(x) = (x - M) % (M * N)
 					   neighbor.push_back(AllCells[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id);
 				   if (j<MAXY-1)//below(x) = (x + M) % (M * N)
@@ -222,7 +222,7 @@ void initCell2D(){
 				   neighbor_index[i+(j*MAXX)] = neighbor;
 				   neighbor.clear();
 		/*		   if(i==2&&j==0){
-					   cout << "\ni+j*MAXX= " << i+j*MAXX << " AllCells id= " <<AllCells[(i+j*MAXX)].id << " neightbors: "
+					   cout << "\n i+j*MAXX= " << i+j*MAXX << " AllCells id= " <<AllCells[(i+j*MAXX)].id << " neightbors: "
 							   << AllCells[((i+j*MAXX)-1)%MAXX].id <<","<< AllCells[((i+j*MAXX)+1)%MAXX].id <<","
 							   << AllCells[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id <<","<< AllCells[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id;
 
@@ -480,12 +480,12 @@ int main(int argc, char **argv)
 
 	cout<<" id = 551 [x,y]= [" << AllCells[551].CellPos.x<<","<<AllCells[551].CellPos.y<< "]";
     cout<< "\n neighbor: ";
-    /*
+
     vector<long> temp = neighbor_index[551];
     for (vector<long>::iterator it = temp.begin() ; it != temp.end(); ++it){
     	cout << ' ' << *it;
     }
-*/
+
 
     // First initialize OpenGL context, so we can properly set the GL for CUDA.
 	// This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.

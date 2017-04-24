@@ -69,13 +69,13 @@ struct Position {
 };
 
 //float state
-#define NOTVALID 0
+#define INACTIVE 0
 #define NORMAL 1
 #define DRIFT 2
 
-#define CA_VON_NEUMANN 0
-#define CA_MOORE 1
-
+#define CA_VON_NEUMANN 1
+#define CA_MOORE 2
+#define NUM_NEIGHBOR 4
 typedef struct {
 	float pressure;
 	float salinity;
@@ -86,12 +86,14 @@ typedef struct {
 	//date date
 	Position FloatPos; //presure
 	vector<FloatMeasurement> measure;
+	int measure_size;
 }FloatTrajectoryPoint;
 
 typedef struct{
 	int id;
 	int floatState;//NORMAL |
 	vector<FloatTrajectoryPoint> trajectory;
+	int trajectory_size;
 }FloatType;
 
 typedef struct celltype{
@@ -101,18 +103,26 @@ typedef struct celltype{
 	//velocity
 	//force
 	Position CellPos;//position
-	int state; //NOTVALID | NORMAL | DRIFT
+	int state; //INACTIVE | NORMAL | DRIFT
 	long id;
 }CellType;
+
+std::array<std::vector<long>, 16384> neighbor_index;
+
+typedef struct Index {
+    long id[NUM_NEIGHBOR];
+}Index;
+
+//typedef struct neighbor
 
 ////////////////////////////////////////////////////////////////////////////////
 // constants
 const unsigned int window_width  = 512;
 const unsigned int window_height = 512;
 
-const unsigned int mesh_width    = 256;
-const unsigned int mesh_height   = 256;
-const unsigned int mesh_length   = 256;
+const unsigned int mesh_width    = 128;
+const unsigned int mesh_height   = 128;
+const unsigned int mesh_length   = 128;
 
 int MAXX=128;
 int MAXY=128;
@@ -120,7 +130,8 @@ int MAXY=128;
 int CELLSIZEX=1.0;
 int CELLSIZEY=1.0;
 
-/*
+#define INVALID_ID 2111111111
+/*          2,147,483,648
 #define DT     0.09f     // Delta T for interative solver
 #define VIS    0.0025f   // Viscosity constant  //do nhot
 #define FORCE (5.8f*DIM) // Force scale factor
@@ -163,33 +174,16 @@ void *d_float_vbo_buffer = NULL;
 
 FloatType *AllFloats = NULL;
 
-CellType *AllCells = NULL;
+CellType *AllCells_host = NULL;
+CellType *AllCells_device;
 
-std::array<std::vector<long>, 16384> neighbor_index;
-/*
-vector<CellType> getNeighbors(int CAmode,CellType aCell)
-{
-	vector<CellType> result;
-	if(CAmode == CA_VON_NEUMANN){ //6 rules
-		//left(x) = (x - 1) % M
-		//result.pushback(AllCells);
-		//right(x) = (x + 1) % M
-		//above(x) = (x - M) % (M * N)
-		//below(x) = (x + M) % (M * N)
+Index *cell_index_host = NULL;
+Index *cell_index_device;
 
-			return result;
-	}else if(CAmode == CA_MOORE){ //26 rules
-		if(aCell.CellPos.x>0)
-		if(aCell.CellPos.x>0)
-		if(aCell.CellPos.x>0)
-			return result;
-	}
-	return result;
-}*/
-void initCell2D(){
-	AllCells = (CellType*) malloc(MAXX*MAXY* sizeof (CellType));
-	long tempid=0;
+void initCell2D(int CAMode){
 
+	long tempid = 0;
+	int num_inactive = 0;
 	    for(int j = 0; j < MAXY; ++j){
 	      for(int i = 0; i < MAXX; ++i)
 	        {
@@ -197,8 +191,18 @@ void initCell2D(){
 	    	  temp.x = (float)i/MAXX ;
 	    	  temp.y = (float)j/MAXY ;
 
-	    	  AllCells[i+MAXY*j].id = tempid;
-	    	  AllCells[i+MAXY*j].CellPos = temp;
+	    	  AllCells_host[i+MAXY*j].id = tempid;
+	    	  AllCells_host[i+MAXY*j].CellPos = temp;
+	    	  int state  = rand() % 100 ;
+	//    	  cout << " state = " <<state;
+	    	  if (state %4 ==0) { //Diep random init
+	    		  AllCells_host[i+MAXY*j].state = NORMAL ;
+	    	//	  cout << " \n NORMAL id = " <<tempid;
+	    	  }else {
+	    		  AllCells_host[i+MAXY*j].state = INACTIVE ;
+	    	//	  cout << " \n INACTIVE id = " <<tempid;
+	    		  num_inactive ++;
+	    	  }
 	    	  tempid++;
 	    	  //Flat[x + HEIGHT* (y + WIDTH* z)]
 //	    	  The algorithm is mostly the same. If you have a 3D array Original[HEIGHT, WIDTH, DEPTH] then you could turn it into Flat[HEIGHT * WIDTH * DEPTH] by
@@ -206,21 +210,46 @@ void initCell2D(){
 	        }
 	    }
 	   // cout << " tempid = " <<tempid;
-	    if(true){ //4 neighbor 2D
+	    if(CAMode==CA_VON_NEUMANN){ //4 neighbor 2D
 	    	vector<long> neighbor ;
 	    	for(int j = 0; j < MAXY; ++j){
 			   for(int i = 0; i < MAXX; ++i)
 				{
-				   if (i>0)//left(x) = (x - 1) % M
-					   neighbor.push_back(AllCells[((i+j*MAXX)-1)].id);
-				   if (i<MAXX-1)//right(x) = (x + 1) % M
-					   neighbor.push_back(AllCells[((i+j*MAXX)+1)].id);
-				   if (j>0)//above(x) = (x - M) % (M * N)
-					   neighbor.push_back(AllCells[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id);
-				   if (j<MAXY-1)//below(x) = (x + M) % (M * N)
-					   neighbor.push_back(AllCells[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id);
+				   long tempindex[NUM_NEIGHBOR];
+
+				   if (i>0){//left(x) = (x - 1) % M
+					   neighbor.push_back(AllCells_host[((i+j*MAXX)-1)].id);
+					   tempindex[0] = AllCells_host[((i+j*MAXX)-1)].id ;
+				   }else {
+					   neighbor.push_back(INVALID_ID);
+					   tempindex[0] = INVALID_ID ;
+				   }
+				   if (i<MAXX-1){//right(x) = (x + 1) % M
+					   neighbor.push_back(AllCells_host[((i+j*MAXX)+1)].id);
+					   tempindex[1] = AllCells_host[((i+j*MAXX)+1)].id ;
+				   }else{
+					   neighbor.push_back(INVALID_ID);
+					   tempindex[1] = INVALID_ID ;
+				   }
+				   if (j>0){//above(x) = (x - M) % (M * N)
+					   neighbor.push_back(AllCells_host[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id);
+					   tempindex[2] = AllCells_host[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id ;
+				   }else {
+					   neighbor.push_back(INVALID_ID);
+					   tempindex[2] = INVALID_ID ;
+				   }
+				   if (j<MAXY-1){//below(x) = (x + M) % (M * N)
+					   neighbor.push_back(AllCells_host[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id);
+					   tempindex[3] = AllCells_host[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id ;
+				   }else {
+					   neighbor.push_back(INVALID_ID);
+					   tempindex[3] = INVALID_ID ;
+				   }
+				   memcpy(cell_index_host[i+(j*MAXX)].id, tempindex, NUM_NEIGHBOR * sizeof(long)); //CA Diep change size
+				//   cell_index_host[i+(j*MAXX)].id = tempindex;
 				   neighbor_index[i+(j*MAXX)] = neighbor;
 				   neighbor.clear();
+
 		/*		   if(i==2&&j==0){
 					   cout << "\n i+j*MAXX= " << i+j*MAXX << " AllCells id= " <<AllCells[(i+j*MAXX)].id << " neightbors: "
 							   << AllCells[((i+j*MAXX)-1)%MAXX].id <<","<< AllCells[((i+j*MAXX)+1)%MAXX].id <<","
@@ -230,34 +259,49 @@ void initCell2D(){
 				}
 	    	}
 	    }
+//	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
 
-/*
-void initCells(){
-
-	AllCells = (CellType*) malloc(MAXX*MAXY*MAXZ * sizeof (CellType));
-	long tempid=0;
-
-	  for(int k = 0; k < MAXZ; ++k)
-	    for(int j = 0; j < MAXY; ++j)
-	      for(int i = 0; i < MAXX; ++i)
-	        {
-	    	  Position temp;
-	    	  temp.x = i/MAXX ;
-	    	  temp.y = j/MAXY ;
-	    	  temp.z = k/MAXZ ;
-	    	  AllCells[i+MAXY*(j+MAXZ*k)].id = tempid;
-	    	  AllCells[i+MAXY*(j+MAXZ*k)].CellPos = temp;
-	    	  tempid++;
-	    	  //Flat[x + HEIGHT* (y + WIDTH* z)]
-//	    	  The algorithm is mostly the same. If you have a 3D array Original[HEIGHT, WIDTH, DEPTH] then you could turn it into Flat[HEIGHT * WIDTH * DEPTH] by
-//	    	  Flat[x + WIDTH * (y + DEPTH * z)] = Original[x, y, z]
-	        }
-}
-*/
-/*
-__global__ void stepCell(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number, curandState *devStates)
+__global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device)
 {
+	// __syncthreads();
+
+    unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
+    unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
+
+ //   printf("\n in Kernel x,y [%d][%d] position: %2f  - %2f   id: %ld  state:%d ",x,y,Cells_device[y*mesh_width+x].CellPos.x,Cells_device[y*mesh_width+x].CellPos.y,Cells_device[y*mesh_width+x].id,Cells_device[y*mesh_width+x].state);
+    if(Cells_device[y*mesh_width+x].state == INACTIVE ){
+    	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f);
+ //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state ++;
+ //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
+    //	Cells_device[y*mesh_width+x].state == INACTIVE
+    	return ;
+    }else
+
+
+	// get neighbor
+  //  if (x% 5 == 0|| y%3 ==0) //not visible - skip it
+  //  	return ;
+
+    // write output vertex
+ // pos[y*width+x] = make_float4(u, w, v, 1.0f);  (x,z,y,alpha);
+  //  if( Cells_d[y*mesh_width+x].state==NORMAL|| Cells_d[y*mesh_width+x].state==DRIFT){
+		if(CAMode ==0){ //vonneuman
+			  pos[y*mesh_width+x] = make_float4(Cells_device[y*mesh_width+x].CellPos.x, 0.5f, Cells_device[y*mesh_width+x].CellPos.y, 1.0f);
+			  Cells_device[y*mesh_width+x].state == INACTIVE;
+		}else {
+			  pos[y*mesh_width+x] = make_float4(Cells_device[y*mesh_width+x].CellPos.x, 1.0f, Cells_device[y*mesh_width+x].CellPos.y, 1.0f);
+			  Cells_device[y*mesh_width+x].state == INACTIVE;
+		}
+   // }
+}
+
+/*
+__global__ void stepCell(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number)
+{
+
+	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
+	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -266,145 +310,16 @@ __global__ void stepCell(FloatState *nowState_d, FloatState *nextState_d, canaux
 	    nextState_d[idx] = computeCell(nowState_d, idx, channels_d, devStates);
 	}
 }
+*/
+
+/*
+
 
 __device__ void computeCell(FloatState *nowState_d, int nodeIndex, canaux *channels_d, curandState* devState_d)
 {
 
 }
 */
-
-///////////////Float kernel /////////////////
-
-void initFloat(FloatType *InitFloats, int node_number,int num_starting_float)
-{
-	int node;
-
-	int startingNode[num_starting_float];
-
-	for (int i = 0; i < node_number; i++)
-	{
-		InitFloats[i].floatState = NORMAL;
-	}
-
-	for (int i = 0; i < num_starting_float; i++)
-	{
-	    startingNode[i] = -1;
-	}
-
-	srand(time(NULL));
-
-	for (int i = 0; i < num_starting_float; i++)
-	{
-
-	    while(1)
-	    {
-			bool fired = false;
-				node = rand() % node_number;
-			for (int j = 0; j < i; j++)
-			{
-				if (startingNode[j] == node)
-				{
-				fired = true;
-				break;
-				}
-			}
-			if (fired == false)
-			{
-			   startingNode[i] = node;
-			   break;
-			}
-	    }
-	    InitFloats[node].floatState = DRIFT;
-	}
-}
-
-
-//-------------------------------------------------------------------------------------------
-/**   Version 1.0
-***** One cell fired if one of its neighbor is fired. If it fired, it changes to ash. If it is ash, it will become empty.
-*****
-*/
-/*
-__device__ FloatState computeStateFloat(FloatState *nowState_d, int nodeIndex, canaux *channels_d, curandState* devState_d)
-{
-	FloatState myState;
-
-	myState = nowState_d[nodeIndex];
-
-	//Checking its neighbours
-	int nbIn = channels_d[nodeIndex].nbIn;
-
-	if (myState.treeState == NORMAL)
-	{
-	   int nodeIn;
-	   for (int i = 0; i < nbIn; i++)
-	   {
-     	    	nodeIn = channels_d[nodeIndex].read[i].node;
-
-	    	if (nowState_d[nodeIn].treeState == FIRED)
-	    	{
-		    myState.treeState = FIRED;
-		    break;
-	    	}
-	   }
-	}
-	else if (myState.treeState == FIRED)
-	{
-	   myState.treeState = ASH;
-	}else if (myState.treeState == ASH)
-	{
-	   myState.treeState = EMPTY;
-	}
-	return myState;
-}
-
-/**
-*This function the changing the state of each cell of the  grid
-*
-*/
-
-/*
-__global__ void stepStateFloat(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number, curandState *devStates)
-{
-
-	int idx = threadIdx.x + blockIdx.x * blockDim.x;
-
-	if (idx < node_number)
-	{
-	    nextState_d[idx] = computeStateFloat(nowState_d, idx, channels_d, devStates);
-	}
-}
-*/
-
-// This method adds constant force vectors to the velocity field
-// stored in 'v' according to v(x,t+1) = v(x,t) + dt * f.
-__global__ void addForces_k(int dx, int dy, int spx, int spy, float fx, float fy, int r, size_t pitch);
-
-// This method performs the velocity advection step, where we
-// trace velocity vectors back in time to update each grid cell.
-// That is, v(x,t+1) = v(p(x,-dt),t). Here we perform bilinear
-// interpolation in the velocity space.
-__global__ void advectVelocity_k(float *vx, float *vy,int dx, int pdx, int dy, float dt, int lb);
-
-// This method performs velocity diffusion and forces mass conservation
-// in the frequency domain. The inputs 'vx' and 'vy' are complex-valued
-// arrays holding the Fourier coefficients of the velocity field in
-// X and Y. Diffusion in this space takes a simple form described as:
-// v(k,t) = v(k,t) / (1 + visc * dt * k^2), where visc is the viscosity,
-// and k is the wavenumber. The projection step forces the Fourier
-// velocity vectors to be orthogonal to the wave wave vectors for each
-// wavenumber: v(k,t) = v(k,t) - ((k dot v(k,t) * k) / k^2.     cData *vy,
-__global__ void diffuseProject_k( int dx, int dy, float dt,float visc, int lb);
-
-// This method updates the velocity field 'v' using the two complex
-// arrays from the previous step: 'vx' and 'vy'. Here we scale the
-// real components by 1/(dx*dy) to account for an unnormalized FFT.
-__global__ void updateVelocity_k(float *vx, float *vy,int dx, int pdx, int dy, int lb, size_t pitch);
-
-// This method updates the particles by moving particle positions
-// according to the velocity field and time step. That is, for each
-// particle: p(t+1) = p(t) + dt * v(p(t)).
-__global__ void advectParticles_k(int dx, int dy,float dt, int lb, size_t pitch);
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -423,24 +338,23 @@ void keyboard(unsigned char key, int x, int y);
 void mouse(int button, int state, int x, int y);
 void motion(int x, int y);
 void timerEvent(int value);
-
+void computeFPS();
 // Cuda functionality
-void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA);
+void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *cells_d);
 
-const char *sSDKsample = "simpleGL (VBO)";
 
 ///////////////////////////////////////////////////////////////////////////////
 //! Simple kernel to modify vertex positions in sine wave pattern
 //! @param data  data in global memory
 ///////////////////////////////////////////////////////////////////////////////
-__global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned int height,unsigned int mesh_length, int CAMode)
+__global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode)
 {
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 	//z =
     // calculate uv coordinates
-    float u = x / (float) width;
-    float v = y / (float) height;
+    float u = x / (float) mesh_width;
+    float v = y / (float) mesh_length;
     u = u*2.0f - 1.0f;
     v = v*2.0f - 1.0f;
 
@@ -454,10 +368,10 @@ __global__ void simple_conveyor_kernel(float4 *pos, unsigned int width, unsigned
  // pos[y*width+x] = make_float4(u, w, v, 1.0f);  (x,z,y,alpha);
 
     if(CAMode ==0){ //vonneuman
-    	  pos[y*width+x] = make_float4(u, 0.5f, v, 1.0f);
+    	  pos[y*mesh_width+x] = make_float4(u, 0.5f, v, 1.0f);
 
 	}else {
-		  pos[y*width+x] = make_float4(u, 1.0f, v, 1.0f);
+		  pos[y*mesh_width+x] = make_float4(u, 1.0f, v, 1.0f);
 
 	}
 }
@@ -476,25 +390,28 @@ int main(int argc, char **argv)
 
 	sdkCreateTimer(&timer);
 
-	initCell2D();
 
-	cout<<" id = 551 [x,y]= [" << AllCells[551].CellPos.x<<","<<AllCells[551].CellPos.y<< "]";
-    cout<< "\n neighbor: ";
+	int arraycellsize = MAXX*MAXY*sizeof(CellType);
+	int arrayindex = MAXX*MAXY*sizeof(Index);
+		//Allocating memory of host variables
+			AllCells_host = (CellType*) malloc(arraycellsize);
+			cell_index_host = (Index*) malloc(arrayindex);
+		//	AllFloats = (FloatType *)
+		//Allocating memory to device variable
 
-    vector<long> temp = neighbor_index[551];
-    for (vector<long>::iterator it = temp.begin() ; it != temp.end(); ++it){
-    	cout << ' ' << *it;
-    }
+	//initVariable();
+	initCell2D(CA_VON_NEUMANN);
 
 
-    // First initialize OpenGL context, so we can properly set the GL for CUDA.
-	// This is necessary in order to achieve optimal performance with OpenGL/CUDA interop.
+	//cout<<" id = 551 [x,y]= [" << AllCells[551].CellPos.x<<","<<AllCells[551].CellPos.y<< "]";
+    //cout<< "\n neighbor: ";
+
+
 	if (false == initGL(&argc, argv))
 	{
 		return false;
 	}
 
-	// use command-line specified CUDA device, otherwise use device with highest Gflops/s
 	if (checkCmdLineFlag(argc, (const char **)argv, "device"))
 	{
 		if (gpuGLDeviceInit(argc, (const char **)argv) == -1)
@@ -507,22 +424,246 @@ int main(int argc, char **argv)
 		cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId());
 	}
 
-	// register callbacks
+
 	glutDisplayFunc(display);
 	glutKeyboardFunc(keyboard);
 	glutMouseFunc(mouse);
 	glutMotionFunc(motion);
 	glutCloseFunc(cleanup);
 
-	// create VBO
+
 	createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
 	createVBO(&float_vbo, &float_vbo_cuda_resource, cudaGraphicsMapFlagsWriteDiscard);
 	// run the cuda part
 	//runCuda(&cuda_vbo_resource,0);
 	//runCuda(&float_vbo_cuda_resource,1);
-	// start rendering mainloop
+
 	glutMainLoop();
 
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+//! Run the Cuda part of the computation
+////////////////////////////////////////////////////////////////////////////////
+void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *Cells_device)
+{
+    // map OpenGL buffer object for writing from CUDA
+    float4 *dptr;
+
+    checkCudaErrors(cudaGraphicsMapResources(1, vbo_resource, 0));
+    size_t num_bytes;
+    checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void **)&dptr, &num_bytes,
+                                                         *vbo_resource));
+    //printf("CUDA mapped VBO: May access %ld bytes\n", num_bytes);
+
+    // execute the kernel game_of_life_kernel
+	dim3 block(8, 8, 1);
+	dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
+	game_of_life_kernel<<< grid, block>>>(dptr, mesh_width,mesh_length, modeCA,Cells_device);
+
+    // unmap buffer object
+    checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//! Create VBO
+////////////////////////////////////////////////////////////////////////////////
+void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
+               unsigned int vbo_res_flags)
+{
+    assert(vbo);
+
+    // create buffer object
+    glGenBuffers(1, vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, *vbo);
+
+    // initialize buffer object
+  //*diep*  unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
+    unsigned int size = mesh_width * mesh_height  * 4 * sizeof(float);
+    glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    // register this buffer object with CUDA
+    checkCudaErrors(cudaGraphicsGLRegisterBuffer(vbo_res, *vbo, vbo_res_flags));
+
+    SDK_CHECK_ERROR_GL();
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+//! Display callback
+////////////////////////////////////////////////////////////////////////////////
+void display()
+{
+    sdkStartTimer(&timer);
+    int arraycellsize = MAXX*MAXY*sizeof(CellType);
+    checkCudaErrors(cudaMalloc((CellType**)&AllCells_device,arraycellsize));
+    checkCudaErrors(cudaMemcpy(AllCells_device, AllCells_host, arraycellsize, cudaMemcpyHostToDevice));
+/*
+    int arrayindex = MAXX*MAXY*sizeof(Index);
+    checkCudaErrors(cudaMalloc(( Index** ) &cell_index_device,arrayindex));
+	checkCudaErrors(cudaMemcpy(cell_index_device, cell_index_host, arrayindex, cudaMemcpyHostToDevice));
+
+*/
+    // run CUDA kernel to generate vertex positions
+    runCuda(&cuda_vbo_resource,0,AllCells_device);
+ //   runCuda(&float_vbo_cuda_resource,1,AllCells_device);
+  //  cudaDeviceSynchronize();
+    checkCudaErrors(cudaMemcpy(AllCells_host,AllCells_device, arraycellsize, cudaMemcpyDeviceToHost));
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // set view matrix
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glTranslatef(0.0, 0.0, translate_z);
+    glRotatef(rotate_x, 1.0, 0.0, 0.0);
+    glRotatef(rotate_y, 0.0, 1.0, 0.0);
+
+    // render from the vbo
+    glPointSize(2.0f);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glVertexPointer(4, GL_FLOAT, 0, 0);
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glColor3f(1.0, 0.0, 0.0);
+    glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
+    glDisableClientState(GL_VERTEX_ARRAY);
+/*
+    //draw float
+    glPointSize(2.0f);
+	glBindBuffer(GL_ARRAY_BUFFER, float_vbo);
+	glVertexPointer(4, GL_FLOAT, 0, 0);
+
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glColor3f(0.0, 1.0, 0.0);
+	glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
+	glDisableClientState(GL_VERTEX_ARRAY);
+*/
+    glutSwapBuffers();
+
+    g_fAnim += 0.01f;
+
+    sdkStopTimer(&timer);
+    computeFPS();
+}
+
+void timerEvent(int value)
+{
+    if (glutGetWindow())
+    {
+        glutPostRedisplay();
+        glutTimerFunc(REFRESH_DELAY, timerEvent,0);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//! Delete VBO
+////////////////////////////////////////////////////////////////////////////////
+void deleteVBO(GLuint *vbo, struct cudaGraphicsResource *vbo_res)
+{
+
+    // unregister this buffer object with CUDA
+    checkCudaErrors(cudaGraphicsUnregisterResource(vbo_res));
+
+    glBindBuffer(1, *vbo);
+    glDeleteBuffers(1, vbo);
+
+    *vbo = 0;
+}
+
+void cleanup()
+{
+    sdkDeleteTimer(&timer);
+
+    if (vbo)
+    {
+        deleteVBO(&vbo, cuda_vbo_resource);
+    }
+
+    if (float_vbo)
+	{
+		deleteVBO(&float_vbo, float_vbo_cuda_resource);
+	}
+
+
+    // cudaDeviceReset causes the driver to clean up all state. While
+    // not mandatory in normal operation, it is good practice.  It is also
+    // needed to ensure correct operation when the application is being
+    // profiled. Calling cudaDeviceReset causes all profile data to be
+    // flushed before the application exits
+    cudaDeviceReset();
+    /*
+	cudaFree(channels_d);
+	cudaFree(nowState_d);
+	cudaFree(nextState_d);
+	cudaFree(buffState_d);
+	cudaFree(devState_d);
+
+	free(AllCells_host);
+	free(AllFloats);
+	free(neighbor_index);
+	//free(nextState_h);
+
+	 */
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+//! Keyboard events handler
+////////////////////////////////////////////////////////////////////////////////
+void keyboard(unsigned char key, int /*x*/, int /*y*/)
+{
+    switch (key)
+    {
+        case (27) :
+
+                glutDestroyWindow(glutGetWindow());
+                return;
+
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//! Mouse event handlers
+////////////////////////////////////////////////////////////////////////////////
+void mouse(int button, int state, int x, int y)
+{
+    if (state == GLUT_DOWN)
+    {
+        mouse_buttons |= 1<<button;
+    }
+    else if (state == GLUT_UP)
+    {
+        mouse_buttons = 0;
+    }
+
+    mouse_old_x = x;
+    mouse_old_y = y;
+}
+
+void motion(int x, int y)
+{
+    float dx, dy;
+    dx = (float)(x - mouse_old_x);
+    dy = (float)(y - mouse_old_y);
+
+    if (mouse_buttons & 1)
+    {
+        rotate_x += dy * 0.2f;
+        rotate_y += dx * 0.2f;
+    }
+    else if (mouse_buttons & 4)
+    {
+        translate_z += dy * 0.01f;
+    }
+
+    mouse_old_x = x;
+    mouse_old_y = y;
 }
 
 void computeFPS()
@@ -587,201 +728,4 @@ bool initGL(int *argc, char **argv)
     SDK_CHECK_ERROR_GL();
 
     return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Run the Cuda part of the computation
-////////////////////////////////////////////////////////////////////////////////
-void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA)
-{
-    // map OpenGL buffer object for writing from CUDA
-    float4 *dptr;
-
-    checkCudaErrors(cudaGraphicsMapResources(1, vbo_resource, 0));
-    size_t num_bytes;
-    checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void **)&dptr, &num_bytes,
-                                                         *vbo_resource));
-    //printf("CUDA mapped VBO: May access %ld bytes\n", num_bytes);
-
-    // execute the kernel
-	dim3 block(8, 8, 1);
-	dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
-	simple_conveyor_kernel<<< grid, block>>>(dptr, mesh_width, mesh_height,mesh_length, modeCA);
-
-    // unmap buffer object
-    checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Create VBO
-////////////////////////////////////////////////////////////////////////////////
-void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
-               unsigned int vbo_res_flags)
-{
-    assert(vbo);
-
-    // create buffer object
-    glGenBuffers(1, vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, *vbo);
-
-    // initialize buffer object
-  //*diep*  unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
-    unsigned int size = mesh_width * mesh_height  * 4 * sizeof(float);
-    glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-    // register this buffer object with CUDA
-    checkCudaErrors(cudaGraphicsGLRegisterBuffer(vbo_res, *vbo, vbo_res_flags));
-
-    SDK_CHECK_ERROR_GL();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Delete VBO
-////////////////////////////////////////////////////////////////////////////////
-void deleteVBO(GLuint *vbo, struct cudaGraphicsResource *vbo_res)
-{
-
-    // unregister this buffer object with CUDA
-    checkCudaErrors(cudaGraphicsUnregisterResource(vbo_res));
-
-    glBindBuffer(1, *vbo);
-    glDeleteBuffers(1, vbo);
-
-    *vbo = 0;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Display callback
-////////////////////////////////////////////////////////////////////////////////
-void display()
-{
-    sdkStartTimer(&timer);
-
-    // run CUDA kernel to generate vertex positions
-    runCuda(&cuda_vbo_resource,0);
-    runCuda(&float_vbo_cuda_resource,1);
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    // set view matrix
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glTranslatef(0.0, 0.0, translate_z);
-    glRotatef(rotate_x, 1.0, 0.0, 0.0);
-    glRotatef(rotate_y, 0.0, 1.0, 0.0);
-
-    // render from the vbo
-    glPointSize(2.0f);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glVertexPointer(4, GL_FLOAT, 0, 0);
-
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glColor3f(1.0, 0.0, 0.0);
-    glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
-    glDisableClientState(GL_VERTEX_ARRAY);
-
-    //draw float
-    glPointSize(2.0f);
-	glBindBuffer(GL_ARRAY_BUFFER, float_vbo);
-	glVertexPointer(4, GL_FLOAT, 0, 0);
-
-	glEnableClientState(GL_VERTEX_ARRAY);
-	glColor3f(0.0, 1.0, 0.0);
-	glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
-	glDisableClientState(GL_VERTEX_ARRAY);
-
-    glutSwapBuffers();
-
-    g_fAnim += 0.01f;
-
-    sdkStopTimer(&timer);
-    computeFPS();
-}
-
-void timerEvent(int value)
-{
-    if (glutGetWindow())
-    {
-        glutPostRedisplay();
-        glutTimerFunc(REFRESH_DELAY, timerEvent,0);
-    }
-}
-
-void cleanup()
-{
-    sdkDeleteTimer(&timer);
-
-    if (vbo)
-    {
-        deleteVBO(&vbo, cuda_vbo_resource);
-    }
-
-    if (float_vbo)
-	{
-		deleteVBO(&float_vbo, float_vbo_cuda_resource);
-	}
-
-
-    // cudaDeviceReset causes the driver to clean up all state. While
-    // not mandatory in normal operation, it is good practice.  It is also
-    // needed to ensure correct operation when the application is being
-    // profiled. Calling cudaDeviceReset causes all profile data to be
-    // flushed before the application exits
-    cudaDeviceReset();
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-//! Keyboard events handler
-////////////////////////////////////////////////////////////////////////////////
-void keyboard(unsigned char key, int /*x*/, int /*y*/)
-{
-    switch (key)
-    {
-        case (27) :
-
-                glutDestroyWindow(glutGetWindow());
-                return;
-
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//! Mouse event handlers
-////////////////////////////////////////////////////////////////////////////////
-void mouse(int button, int state, int x, int y)
-{
-    if (state == GLUT_DOWN)
-    {
-        mouse_buttons |= 1<<button;
-    }
-    else if (state == GLUT_UP)
-    {
-        mouse_buttons = 0;
-    }
-
-    mouse_old_x = x;
-    mouse_old_y = y;
-}
-
-void motion(int x, int y)
-{
-    float dx, dy;
-    dx = (float)(x - mouse_old_x);
-    dy = (float)(y - mouse_old_y);
-
-    if (mouse_buttons & 1)
-    {
-        rotate_x += dy * 0.2f;
-        rotate_y += dx * 0.2f;
-    }
-    else if (mouse_buttons & 4)
-    {
-        translate_z += dy * 0.01f;
-    }
-
-    mouse_old_x = x;
-    mouse_old_y = y;
 }

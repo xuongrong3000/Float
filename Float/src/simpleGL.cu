@@ -107,7 +107,7 @@ typedef struct celltype{
 	long id;
 }CellType;
 
-std::array<std::vector<long>, 16384> neighbor_index;
+//std::array<std::vector<long>, 16384> neighbor_index;
 
 typedef struct Index {
     long id[NUM_NEIGHBOR];
@@ -218,37 +218,37 @@ void initCell2D(int CAMode){
 				   long tempindex[NUM_NEIGHBOR];
 
 				   if (i>0){//left(x) = (x - 1) % M
-					   neighbor.push_back(AllCells_host[((i+j*MAXX)-1)].id);
+		//			   neighbor.push_back(AllCells_host[((i+j*MAXX)-1)].id);
 					   tempindex[0] = AllCells_host[((i+j*MAXX)-1)].id ;
 				   }else {
-					   neighbor.push_back(INVALID_ID);
+	//   neighbor.push_back(INVALID_ID);
 					   tempindex[0] = INVALID_ID ;
 				   }
 				   if (i<MAXX-1){//right(x) = (x + 1) % M
-					   neighbor.push_back(AllCells_host[((i+j*MAXX)+1)].id);
+		//   neighbor.push_back(AllCells_host[((i+j*MAXX)+1)].id);
 					   tempindex[1] = AllCells_host[((i+j*MAXX)+1)].id ;
 				   }else{
-					   neighbor.push_back(INVALID_ID);
+	//   neighbor.push_back(INVALID_ID);
 					   tempindex[1] = INVALID_ID ;
 				   }
 				   if (j>0){//above(x) = (x - M) % (M * N)
-					   neighbor.push_back(AllCells_host[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id);
+	//			   neighbor.push_back(AllCells_host[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id);
 					   tempindex[2] = AllCells_host[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id ;
 				   }else {
-					   neighbor.push_back(INVALID_ID);
+	//				   neighbor.push_back(INVALID_ID);
 					   tempindex[2] = INVALID_ID ;
 				   }
 				   if (j<MAXY-1){//below(x) = (x + M) % (M * N)
-					   neighbor.push_back(AllCells_host[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id);
+	//				   neighbor.push_back(AllCells_host[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id);
 					   tempindex[3] = AllCells_host[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id ;
 				   }else {
-					   neighbor.push_back(INVALID_ID);
+	//				   neighbor.push_back(INVALID_ID);
 					   tempindex[3] = INVALID_ID ;
 				   }
 				   memcpy(cell_index_host[i+(j*MAXX)].id, tempindex, NUM_NEIGHBOR * sizeof(long)); //CA Diep change size
 				//   cell_index_host[i+(j*MAXX)].id = tempindex;
-				   neighbor_index[i+(j*MAXX)] = neighbor;
-				   neighbor.clear();
+	//			   neighbor_index[i+(j*MAXX)] = neighbor;
+	//			   neighbor.clear();
 
 		/*		   if(i==2&&j==0){
 					   cout << "\n i+j*MAXX= " << i+j*MAXX << " AllCells id= " <<AllCells[(i+j*MAXX)].id << " neightbors: "
@@ -263,7 +263,23 @@ void initCell2D(int CAMode){
 }
 __device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device){
 //	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f);
-	    	Cells_device[index_device[idx].id[0]].state = NORMAL;
+	    	if(index_device[idx].id[0]!=INVALID_ID){
+	    		Cells_device[index_device[idx].id[0]].state ++;
+				Cells_device[index_device[idx].id[0]].state %=2;
+	    	}
+	    	if(index_device[idx].id[1]!=INVALID_ID){
+				Cells_device[index_device[idx].id[1]].state ++;
+				Cells_device[index_device[idx].id[1]].state %=2;
+			}
+	    	if(index_device[idx].id[2]!=INVALID_ID){
+				Cells_device[index_device[idx].id[2]].state ++;
+				Cells_device[index_device[idx].id[2]].state %=2;
+			}
+	    	if(index_device[idx].id[3]!=INVALID_ID){
+				Cells_device[index_device[idx].id[3]].state ++;
+				Cells_device[index_device[idx].id[3]].state %=2;
+			}
+
 	 //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
 	 //	Cells_device[y*mesh_width+x].state == INACTIVE
 	    	return ;
@@ -282,7 +298,7 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigne
  //   	Cells_device[index_device[y*mesh_width+x].id[0]].state = NORMAL;
  //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
     //	Cells_device[y*mesh_width+x].state == INACTIVE
- //   	stepCell(y*mesh_width+x,mesh_width,mesh_length,CAMode,Cells_device,index_device);
+    	stepCell(y*mesh_width+x,mesh_width,mesh_length,CAMode,Cells_device,index_device);
     }else
 	// get neighbor
   //  if (x% 5 == 0|| y%3 ==0) //not visible - skip it
@@ -616,7 +632,7 @@ void cleanup()
 
 	free(AllCells_host);
 	free(AllFloats);
-	free(neighbor_index);
+//	free(neighbor_index);
 	free(cell_index_host);
 	//free(nextState_h);
 

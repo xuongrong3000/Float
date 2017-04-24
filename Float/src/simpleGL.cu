@@ -261,24 +261,29 @@ void initCell2D(int CAMode){
 	    }
 //	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
+__device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device){
+//	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f);
+	    	Cells_device[index_device[idx].id[0]].state = NORMAL;
+	 //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
+	 //	Cells_device[y*mesh_width+x].state == INACTIVE
+	    	return ;
 
-__global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device)
+}
+__global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device)
 {
 	// __syncthreads();
 
     unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
     unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-
- //   printf("\n in Kernel x,y [%d][%d] position: %2f  - %2f   id: %ld  state:%d ",x,y,Cells_device[y*mesh_width+x].CellPos.x,Cells_device[y*mesh_width+x].CellPos.y,Cells_device[y*mesh_width+x].id,Cells_device[y*mesh_width+x].state);
+//    printf("\n in Kernel y,x [%d][%d] index: %ld  cellID: %ld ",y,x,index_device[y*mesh_width+x].id[0],Cells_device[y*mesh_width+x].id);
+ //   printf("\n in Kernel y,x [%d][%d] position: %2f  - %2f   id: %ld  state:%d ",y,x,Cells_device[y*mesh_width+x].CellPos.x,Cells_device[y*mesh_width+x].CellPos.y,Cells_device[y*mesh_width+x].id,Cells_device[y*mesh_width+x].state);
     if(Cells_device[y*mesh_width+x].state == INACTIVE ){
     	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f);
- //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state ++;
+ //   	Cells_device[index_device[y*mesh_width+x].id[0]].state = NORMAL;
  //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
     //	Cells_device[y*mesh_width+x].state == INACTIVE
-    	return ;
+ //   	stepCell(y*mesh_width+x,mesh_width,mesh_length,CAMode,Cells_device,index_device);
     }else
-
-
 	// get neighbor
   //  if (x% 5 == 0|| y%3 ==0) //not visible - skip it
   //  	return ;
@@ -295,6 +300,7 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigne
 		}
    // }
 }
+
 
 /*
 __global__ void stepCell(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number)
@@ -340,7 +346,7 @@ void motion(int x, int y);
 void timerEvent(int value);
 void computeFPS();
 // Cuda functionality
-void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *cells_d);
+void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *cells_d,Index * index_device);
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -447,7 +453,7 @@ int main(int argc, char **argv)
 ////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
 ////////////////////////////////////////////////////////////////////////////////
-void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *Cells_device)
+void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *Cells_device,Index *index_device)
 {
     // map OpenGL buffer object for writing from CUDA
     float4 *dptr;
@@ -461,7 +467,7 @@ void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *Cel
     // execute the kernel game_of_life_kernel
 	dim3 block(8, 8, 1);
 	dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
-	game_of_life_kernel<<< grid, block>>>(dptr, mesh_width,mesh_length, modeCA,Cells_device);
+	game_of_life_kernel<<< grid, block>>>(dptr, mesh_width,mesh_length, modeCA,Cells_device,index_device);
 
     // unmap buffer object
     checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
@@ -499,18 +505,24 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
 ////////////////////////////////////////////////////////////////////////////////
 void display()
 {
+//	cout<<"\n average time = "<<sdkGetAverageTimerValue(&timer) / 1000.f ;
+/*	if (sdkGetAverageTimerValue(&timer)>0.1) {
+		sdkStopTimer(&timer);sdkStartTimer(&timer);
+		return;
+	}
+	*/
     sdkStartTimer(&timer);
     int arraycellsize = MAXX*MAXY*sizeof(CellType);
     checkCudaErrors(cudaMalloc((CellType**)&AllCells_device,arraycellsize));
     checkCudaErrors(cudaMemcpy(AllCells_device, AllCells_host, arraycellsize, cudaMemcpyHostToDevice));
-/*
+
     int arrayindex = MAXX*MAXY*sizeof(Index);
     checkCudaErrors(cudaMalloc(( Index** ) &cell_index_device,arrayindex));
 	checkCudaErrors(cudaMemcpy(cell_index_device, cell_index_host, arrayindex, cudaMemcpyHostToDevice));
 
-*/
+
     // run CUDA kernel to generate vertex positions
-    runCuda(&cuda_vbo_resource,0,AllCells_device);
+    runCuda(&cuda_vbo_resource,0,AllCells_device,cell_index_device);
  //   runCuda(&float_vbo_cuda_resource,1,AllCells_device);
   //  cudaDeviceSynchronize();
     checkCudaErrors(cudaMemcpy(AllCells_host,AllCells_device, arraycellsize, cudaMemcpyDeviceToHost));
@@ -597,19 +609,18 @@ void cleanup()
     // profiled. Calling cudaDeviceReset causes all profile data to be
     // flushed before the application exits
     cudaDeviceReset();
-    /*
-	cudaFree(channels_d);
-	cudaFree(nowState_d);
-	cudaFree(nextState_d);
-	cudaFree(buffState_d);
-	cudaFree(devState_d);
+
+	cudaFree(cell_index_device);
+	cudaFree(AllCells_device);
+
 
 	free(AllCells_host);
 	free(AllFloats);
 	free(neighbor_index);
+	free(cell_index_host);
 	//free(nextState_h);
 
-	 */
+
 }
 
 

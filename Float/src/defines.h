@@ -9,22 +9,19 @@
 #include <vector>
 #include <array>
 
-
-
-
-
 using namespace std;
-
 
 typedef struct
 {
-	int x;
-	int y;
+	float x;
+	float y;
+	float z;
 }Direction;
 
 struct Position {
     float x;
     float y;
+    float z;
 };
 
 //float state
@@ -32,9 +29,15 @@ struct Position {
 #define NORMAL 1
 #define DRIFT 2
 
+#define MAX_MEASURE_SIZE 10
+#define MAX_TRAJECTORY_SIZE 10
+
+//cell
 #define CA_VON_NEUMANN 1
 #define CA_MOORE 2
 #define NUM_NEIGHBOR 4
+
+#define INVALID_ID 2111111111
 
 ////////////////////////////////////////////////////////////////////////////////
 // constants
@@ -45,10 +48,6 @@ const unsigned int mesh_width    = 128;
 const unsigned int mesh_height   = 128;
 const unsigned int mesh_length   = 128;
 
-
-
-#define INVALID_ID 2111111111
-
 typedef struct {
 	float pressure;
 	float salinity;
@@ -58,20 +57,20 @@ typedef struct {
 typedef struct {
 	//date date
 	Position FloatPos; //presure
-	vector<FloatMeasurement> measure;
+	FloatMeasurement *measure;
 	int measure_size;
 }FloatTrajectoryPoint;
 
 typedef struct{
 	int id;
 	int floatState;//NORMAL |
-	vector<FloatTrajectoryPoint> trajectory;
+	FloatTrajectoryPoint* trajectory;
 	int trajectory_size;
 }FloatType;
 
 typedef struct celltype{
 	float temperature;
-	float height; //presure
+	float depth; //presure
 	float salinity;
 	//velocity
 	//force
@@ -80,12 +79,8 @@ typedef struct celltype{
 	long id;
 }CellType;
 
-//std::array<std::vector<long>, 16384> neighbor_index;
-
 typedef struct Index {
     long id[NUM_NEIGHBOR];
 }Index;
-
-//typedef struct neighbor
 
 

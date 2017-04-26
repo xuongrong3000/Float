@@ -57,6 +57,7 @@
 
 int MAXX=128;
 int MAXY=128;
+int MAXZ=128;
 
 int CELLSIZEX=1.0;
 int CELLSIZEY=1.0;
@@ -65,11 +66,11 @@ using namespace std;
 using namespace boost;
 ////////////////////// struct
 
-extern __device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
+//extern __device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
 extern __global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
-extern __global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode);
+//extern __global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode);
 
-extern __global__ void runfloat(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
+//extern __global__ void runfloat(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
 //extern __device__ void
 
 /*          2,147,483,648
@@ -78,7 +79,6 @@ extern __global__ void runfloat(float4 *pos, unsigned int mesh_width,unsigned in
 #define FORCE (5.8f*DIM) // Force scale factor
 #define FR     4         // Force update radius
 */
-
 
 float g_fAnim = 0.0;
 
@@ -108,13 +108,17 @@ struct cudaGraphicsResource *cuda_vbo_resource;
 void *d_vbo_buffer = NULL;
 
 GLuint float_vbo;
+float4 *floatPos;
+/*
 struct cudaGraphicsResource *float_vbo_cuda_resource;
 void *d_float_vbo_buffer = NULL;
-
+*/
 ////////////////// bien toan cuc luu tru thong tin
 
+bool showFloat = true;
+int num_floats = 5;
 FloatType *AllFloats_host = NULL;
-FloatType *AllFloats_device = NULL;
+FloatType *AllFloats_device;
 
 CellType *AllCells_host = NULL;
 CellType *AllCells_device;
@@ -130,7 +134,7 @@ void initCell2D(int CAMode){
 	long tempid = 0;
 	int num_inactive = 0;
 	    for(int j = 0; j < MAXY; ++j){
-	      for(int i = 0; i < MAXX; ++i)
+	        for(int i = 0; i < MAXX; ++i)
 	        {
 	    	  Position temp;
 	    	  temp.x = (float)i/MAXX ;
@@ -163,43 +167,32 @@ void initCell2D(int CAMode){
 				   long tempindex[NUM_NEIGHBOR];
 
 				   if (i>0){//left(x) = (x - 1) % M
-		//			   neighbor.push_back(AllCells_host[((i+j*MAXX)-1)].id);
 					   tempindex[0] = AllCells_host[((i+j*MAXX)-1)].id ;
 				   }else {
-	//   neighbor.push_back(INVALID_ID);
 					   tempindex[0] = INVALID_ID ;
 				   }
 				   if (i<MAXX-1){//right(x) = (x + 1) % M
-		//   neighbor.push_back(AllCells_host[((i+j*MAXX)+1)].id);
 					   tempindex[1] = AllCells_host[((i+j*MAXX)+1)].id ;
 				   }else{
-	//   neighbor.push_back(INVALID_ID);
 					   tempindex[1] = INVALID_ID ;
 				   }
 				   if (j>0){//above(x) = (x - M) % (M * N)
-	//			   neighbor.push_back(AllCells_host[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id);
 					   tempindex[2] = AllCells_host[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id ;
 				   }else {
-	//				   neighbor.push_back(INVALID_ID);
 					   tempindex[2] = INVALID_ID ;
 				   }
 				   if (j<MAXY-1){//below(x) = (x + M) % (M * N)
-	//				   neighbor.push_back(AllCells_host[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id);
 					   tempindex[3] = AllCells_host[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id ;
 				   }else {
-	//				   neighbor.push_back(INVALID_ID);
 					   tempindex[3] = INVALID_ID ;
 				   }
 				   memcpy(cell_index_host[i+(j*MAXX)].id, tempindex, NUM_NEIGHBOR * sizeof(long)); //CA Diep change size
 				//   cell_index_host[i+(j*MAXX)].id = tempindex;
-	//			   neighbor_index[i+(j*MAXX)] = neighbor;
-	//			   neighbor.clear();
 
 		/*		   if(i==2&&j==0){
 					   cout << "\n i+j*MAXX= " << i+j*MAXX << " AllCells id= " <<AllCells[(i+j*MAXX)].id << " neightbors: "
 							   << AllCells[((i+j*MAXX)-1)%MAXX].id <<","<< AllCells[((i+j*MAXX)+1)%MAXX].id <<","
 							   << AllCells[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id <<","<< AllCells[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id;
-
 				   }*/
 				}
 	    	}
@@ -207,10 +200,38 @@ void initCell2D(int CAMode){
 //	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
 
-
-
 void initFloat(){
 
+	for (int k=0;k<num_floats; k++){
+		FloatType tempfloattype;
+		tempfloattype.trajectory = (FloatTrajectoryPoint*)malloc (MAX_TRAJECTORY_SIZE *sizeof(FloatTrajectoryPoint));
+		tempfloattype.trajectory_size = MAX_TRAJECTORY_SIZE ;
+		for(int j = 0; j < MAX_TRAJECTORY_SIZE; ++j){
+		    FloatTrajectoryPoint temppoint;
+		    temppoint.measure = (FloatMeasurement *) malloc (MAX_MEASURE_SIZE*sizeof(FloatMeasurement));
+		    temppoint.measure_size = MAX_MEASURE_SIZE;
+		    for(int i = 0; i < MAX_MEASURE_SIZE; ++i)
+		    {
+			    FloatMeasurement tempmes;
+			    tempmes.pressure = (float)(rand() % 200)*10;
+			    tempmes.salinity = (float)(rand() % 360)/10;
+			    tempmes.temperature = (float)(rand() % 360)/10;
+			    temppoint.measure[i] = tempmes;
+		    }
+		    Position temppos;
+		    temppos.x = (float)(rand() % 100)/100 ;
+		    temppos.y = (float)(rand() % 100)/100 ;
+		    temppos.z = (float)(rand() % 20)/21 ;
+		    //add date
+
+		    temppoint.FloatPos = temppos;
+		    tempfloattype.trajectory[j] = temppoint;
+	    }
+	    tempfloattype.id =k ;
+	    tempfloattype.floatState = DRIFT;
+	    AllFloats_host[k] = tempfloattype;
+	//  memcpy(cell_index_host[i+(j*MAXX)].id, tempindex, NUM_NEIGHBOR * sizeof(long)); //CA Diep change size
+	 }
 }
 
 
@@ -312,15 +333,26 @@ int main(int argc, char **argv)
 
 	int arraycellsize = MAXX*MAXY*sizeof(CellType);
 	int arrayindex = MAXX*MAXY*sizeof(Index);
+	int arrayfloatsize = num_floats*sizeof(FloatType);
 		//Allocating memory of host variables
-			AllCells_host = (CellType*) malloc(arraycellsize);
-			cell_index_host = (Index*) malloc(arrayindex);
-		//	AllFloats = (FloatType *)
+	AllCells_host = (CellType*) malloc(arraycellsize);
+	cell_index_host = (Index*) malloc(arrayindex);
+	AllFloats_host = (FloatType *) malloc(arrayfloatsize);
 		//Allocating memory to device variable
 
 	//initVariable();
 	initCell2D(CA_VON_NEUMANN);
 	initSurface();
+	initFloat();
+
+//	int arraycellsize = MAXX*MAXY*sizeof(CellType);
+	checkCudaErrors(cudaMalloc((CellType**)&AllCells_device,arraycellsize));
+	checkCudaErrors(cudaMemcpy(AllCells_device, AllCells_host, arraycellsize, cudaMemcpyHostToDevice));
+
+//	int arrayindex = MAXX*MAXY*sizeof(Index);
+	checkCudaErrors(cudaMalloc(( Index** ) &cell_index_device,arrayindex));
+	checkCudaErrors(cudaMemcpy(cell_index_device, cell_index_host, arrayindex, cudaMemcpyHostToDevice));
+
 
 	//cout<<" id = 551 [x,y]= [" << AllCells[551].CellPos.x<<","<<AllCells[551].CellPos.y<< "]";
     //cout<< "\n neighbor: ";
@@ -352,10 +384,7 @@ int main(int argc, char **argv)
 
 
 	createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
-	createVBO(&float_vbo, &float_vbo_cuda_resource, cudaGraphicsMapFlagsWriteDiscard);
-	// run the cuda part
-	//runCuda(&cuda_vbo_resource,0);
-	//runCuda(&float_vbo_cuda_resource,1);
+// createVBO(&float_vbo, &float_vbo_cuda_resource, cudaGraphicsMapFlagsWriteDiscard);
 
 	glutMainLoop();
 
@@ -426,20 +455,13 @@ void display()
 	*/
 
     sdkStartTimer(&timer);
-    int arraycellsize = MAXX*MAXY*sizeof(CellType);
-    checkCudaErrors(cudaMalloc((CellType**)&AllCells_device,arraycellsize));
-    checkCudaErrors(cudaMemcpy(AllCells_device, AllCells_host, arraycellsize, cudaMemcpyHostToDevice));
-
-    int arrayindex = MAXX*MAXY*sizeof(Index);
-    checkCudaErrors(cudaMalloc(( Index** ) &cell_index_device,arrayindex));
-	checkCudaErrors(cudaMemcpy(cell_index_device, cell_index_host, arrayindex, cudaMemcpyHostToDevice));
 
 
     // run CUDA kernel to generate vertex positions
     runCuda(&cuda_vbo_resource,0,AllCells_device,cell_index_device);
  //   runCuda(&float_vbo_cuda_resource,1,AllCells_device);
   //  cudaDeviceSynchronize();
-    checkCudaErrors(cudaMemcpy(AllCells_host,AllCells_device, arraycellsize, cudaMemcpyDeviceToHost));
+ //   checkCudaErrors(cudaMemcpy(AllCells_host,AllCells_device, arraycellsize, cudaMemcpyDeviceToHost));
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -489,6 +511,36 @@ void display()
 
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
     }
+
+    if(showFloat){
+    	GLuint float_vbo;
+    	float4 *floatPos;
+    	for(int k=0;k<num_floats;k++){
+			glGenBuffers(1, &float_vbo);
+			glBindBuffer(GL_ARRAY_BUFFER, float_vbo);
+			unsigned int trajecsize = AllFloats_host[k].trajectory_size  * 4 * sizeof(float);
+			floatPos = (float4*) malloc (trajecsize);
+			for(int i =0; i<AllFloats_host[k].trajectory_size;i++){
+				floatPos[i] = make_float4(AllFloats_host[k].trajectory[i].FloatPos.x, AllFloats_host[k].trajectory[i].FloatPos.z, AllFloats_host[k].trajectory[i].FloatPos.y, 1.0f);
+			}
+			glBufferData(GL_ARRAY_BUFFER, trajecsize, floatPos, GL_STATIC_DRAW);
+
+
+	   // 	glBindBuffer(GL_ARRAY_BUFFER, surfaceVBO);
+			glVertexPointer(4, GL_FLOAT, 0, 0);
+
+			glEnableClientState(GL_VERTEX_ARRAY);
+			float tempgreen = (float)(rand()%100)/100;
+			float tempred = (float)(rand()%100)/100;
+			float tempblue = (float)(rand()%100)/100;
+			glColor3f(tempred, tempgreen, tempblue);
+
+			glDrawArrays(GL_LINE_STRIP, 0, AllFloats_host[k].trajectory_size);
+			glDisableClientState(GL_VERTEX_ARRAY);
+
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+    	}
+    }
     glutSwapBuffers();
 
     g_fAnim += 0.01f;
@@ -530,11 +582,11 @@ void cleanup()
         deleteVBO(&vbo, cuda_vbo_resource);
     }
 
-    if (float_vbo)
+  /*  if (float_vbo)
 	{
 		deleteVBO(&float_vbo, float_vbo_cuda_resource);
 	}
-
+ */
 
     // cudaDeviceReset causes the driver to clean up all state. While
     // not mandatory in normal operation, it is good practice.  It is also
@@ -655,7 +707,13 @@ bool initGL(int *argc, char **argv)
 
     // default initialization
     glClearColor(0.0, 0.0, 0.0, 1.0);
-    glDisable(GL_DEPTH_TEST);
+ //   glDisable(GL_DEPTH_TEST);
+
+    // Enable depth test
+    glEnable(GL_DEPTH_TEST);
+    // Accept fragment if it closer to the camera than the former one
+    glDepthFunc(GL_LESS);
+
 
     // viewport
     glViewport(0, 0, window_width, window_height);

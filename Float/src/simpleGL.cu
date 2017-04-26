@@ -24,105 +24,36 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-#include <vector>
-#include <array>
+
 #include <iostream>
 // OpenGL Graphics includes
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 
-// includes, cuda
+#include <timer.h>               // timing functions
+
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
 // Utilities and timing functions
 #include <helper_functions.h>    // includes cuda.h and cuda_runtime_api.h
-#include <timer.h>               // timing functions
-
 // CUDA helper functions
 #include <helper_cuda.h>         // helper functions for CUDA error check
 #include <helper_cuda_gl.h>      // helper functions for CUDA/GL interop
 
 #include <vector_types.h>
 
-#include "kernel.cu"
 
+//#include "kernel.cu"
+#include "defines.h"
 
 #include <boost/multi_array.hpp>
 #include <cassert>
+
+
 #define MAX_EPSILON_ERROR 10.0f
 #define THRESHOLD          0.30f
 #define REFRESH_DELAY     10 //ms
-
-using namespace std;
-using namespace boost;
-////////////////////// struct
-typedef struct
-{
-	int x;
-	int y;
-}Direction;
-
-struct Position {
-    float x;
-    float y;
-};
-
-//float state
-#define INACTIVE 0
-#define NORMAL 1
-#define DRIFT 2
-
-#define CA_VON_NEUMANN 1
-#define CA_MOORE 2
-#define NUM_NEIGHBOR 4
-typedef struct {
-	float pressure;
-	float salinity;
-	float temperature;
-}FloatMeasurement;
-
-typedef struct {
-	//date date
-	Position FloatPos; //presure
-	vector<FloatMeasurement> measure;
-	int measure_size;
-}FloatTrajectoryPoint;
-
-typedef struct{
-	int id;
-	int floatState;//NORMAL |
-	vector<FloatTrajectoryPoint> trajectory;
-	int trajectory_size;
-}FloatType;
-
-typedef struct celltype{
-	float temperature;
-	float height; //presure
-	float salinity;
-	//velocity
-	//force
-	Position CellPos;//position
-	int state; //INACTIVE | NORMAL | DRIFT
-	long id;
-}CellType;
-
-//std::array<std::vector<long>, 16384> neighbor_index;
-
-typedef struct Index {
-    long id[NUM_NEIGHBOR];
-}Index;
-
-//typedef struct neighbor
-
-////////////////////////////////////////////////////////////////////////////////
-// constants
-const unsigned int window_width  = 512;
-const unsigned int window_height = 512;
-
-const unsigned int mesh_width    = 128;
-const unsigned int mesh_height   = 128;
-const unsigned int mesh_length   = 128;
 
 int MAXX=128;
 int MAXY=128;
@@ -130,13 +61,24 @@ int MAXY=128;
 int CELLSIZEX=1.0;
 int CELLSIZEY=1.0;
 
-#define INVALID_ID 2111111111
+using namespace std;
+using namespace boost;
+////////////////////// struct
+
+extern __device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
+extern __global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
+extern __global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode);
+
+extern __global__ void runfloat(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
+//extern __device__ void
+
 /*          2,147,483,648
 #define DT     0.09f     // Delta T for interative solver
 #define VIS    0.0025f   // Viscosity constant  //do nhot
 #define FORCE (5.8f*DIM) // Force scale factor
 #define FR     4         // Force update radius
 */
+
 
 float g_fAnim = 0.0;
 
@@ -155,7 +97,6 @@ int fpsLimit = 1;        // FPS limit for sampling
 float avgFPS = 0.0f;
 unsigned int frameCount = 0;
 
-
 int *pArgc = NULL;
 char **pArgv = NULL;
 
@@ -172,7 +113,8 @@ void *d_float_vbo_buffer = NULL;
 
 ////////////////// bien toan cuc luu tru thong tin
 
-FloatType *AllFloats = NULL;
+FloatType *AllFloats_host = NULL;
+FloatType *AllFloats_device = NULL;
 
 CellType *AllCells_host = NULL;
 CellType *AllCells_device;
@@ -180,8 +122,11 @@ CellType *AllCells_device;
 Index *cell_index_host = NULL;
 Index *cell_index_device;
 
-void initCell2D(int CAMode){
+float4 *surfacePos;
+GLuint surfaceVBO;
+bool showSurface = true;
 
+void initCell2D(int CAMode){
 	long tempid = 0;
 	int num_inactive = 0;
 	    for(int j = 0; j < MAXY; ++j){
@@ -261,63 +206,49 @@ void initCell2D(int CAMode){
 	    }
 //	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
-__device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device){
-//	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f);
-	    	if(index_device[idx].id[0]!=INVALID_ID){
-	    		Cells_device[index_device[idx].id[0]].state ++;
-				Cells_device[index_device[idx].id[0]].state %=2;
-	    	}
-	    	if(index_device[idx].id[1]!=INVALID_ID){
-				Cells_device[index_device[idx].id[1]].state ++;
-				Cells_device[index_device[idx].id[1]].state %=2;
-			}
-	    	if(index_device[idx].id[2]!=INVALID_ID){
-				Cells_device[index_device[idx].id[2]].state ++;
-				Cells_device[index_device[idx].id[2]].state %=2;
-			}
-	    	if(index_device[idx].id[3]!=INVALID_ID){
-				Cells_device[index_device[idx].id[3]].state ++;
-				Cells_device[index_device[idx].id[3]].state %=2;
-			}
 
-	 //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
-	 //	Cells_device[y*mesh_width+x].state == INACTIVE
-	    	return ;
+
+
+void initFloat(){
 
 }
-__global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device)
-{
-	// __syncthreads();
 
-    unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
-    unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-//    printf("\n in Kernel y,x [%d][%d] index: %ld  cellID: %ld ",y,x,index_device[y*mesh_width+x].id[0],Cells_device[y*mesh_width+x].id);
- //   printf("\n in Kernel y,x [%d][%d] position: %2f  - %2f   id: %ld  state:%d ",y,x,Cells_device[y*mesh_width+x].CellPos.x,Cells_device[y*mesh_width+x].CellPos.y,Cells_device[y*mesh_width+x].id,Cells_device[y*mesh_width+x].state);
-    if(Cells_device[y*mesh_width+x].state == INACTIVE ){
-    	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f);
- //   	Cells_device[index_device[y*mesh_width+x].id[0]].state = NORMAL;
- //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
-    //	Cells_device[y*mesh_width+x].state == INACTIVE
-    	stepCell(y*mesh_width+x,mesh_width,mesh_length,CAMode,Cells_device,index_device);
-    }else
-	// get neighbor
-  //  if (x% 5 == 0|| y%3 ==0) //not visible - skip it
-  //  	return ;
 
-    // write output vertex
- // pos[y*width+x] = make_float4(u, w, v, 1.0f);  (x,z,y,alpha);
-  //  if( Cells_d[y*mesh_width+x].state==NORMAL|| Cells_d[y*mesh_width+x].state==DRIFT){
-		if(CAMode ==0){ //vonneuman
-			  pos[y*mesh_width+x] = make_float4(Cells_device[y*mesh_width+x].CellPos.x, 0.5f, Cells_device[y*mesh_width+x].CellPos.y, 1.0f);
-			  Cells_device[y*mesh_width+x].state == INACTIVE;
-		}else {
-			  pos[y*mesh_width+x] = make_float4(Cells_device[y*mesh_width+x].CellPos.x, 1.0f, Cells_device[y*mesh_width+x].CellPos.y, 1.0f);
-			  Cells_device[y*mesh_width+x].state == INACTIVE;
+void initSurface(){
+	surfacePos = (float4 *) malloc(sizeof(float4)*MAXX*MAXY);
+	for (int j=0; j<MAXY; j++){
+		for (int i=0; i<MAXX;i++){
+			float x = (float) i/MAXX ;
+			float y = (float) j/MAXY ;
+			surfacePos[j*MAXX+i] = make_float4(x, 1.0f, y, 1.0f);
 		}
-   // }
+	}
+
+//	 assert(surfaceVBO);
+	// create buffer object
+
+/*
+	GLuint points_vbo = 0;
+	glGenBuffers(1, &points_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, points_vbo);
+	glBufferData(GL_ARRAY_BUFFER, 9 * sizeof(float), points, GL_STATIC_DRAW);
+*/
+
+/*
+	glGenBuffers(1, VertexVBOID);
+	  glBindBuffer(GL_ARRAY_BUFFER, VertexVBOID);
+	  glBufferData(GL_ARRAY_BUFFER, sizeof(MyVertex)*3, &pvertex[0].x, GL_STATIC_DRAW);
+
+	  ushort pindices[3];
+	  pindices[0] = 0;
+	  pindices[1] = 1;
+	  pindices[2] = 2;
+
+	  glGenBuffers(1, &IndexVBOID);
+	  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, IndexVBOID);
+	  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(ushort)*3, pindices, GL_STATIC_DRAW);
+*/
 }
-
-
 /*
 __global__ void stepCell(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number)
 {
@@ -365,40 +296,6 @@ void computeFPS();
 void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *cells_d,Index * index_device);
 
 
-///////////////////////////////////////////////////////////////////////////////
-//! Simple kernel to modify vertex positions in sine wave pattern
-//! @param data  data in global memory
-///////////////////////////////////////////////////////////////////////////////
-__global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode)
-{
-    unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
-    unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
-	//z =
-    // calculate uv coordinates
-    float u = x / (float) mesh_width;
-    float v = y / (float) mesh_length;
-    u = u*2.0f - 1.0f;
-    v = v*2.0f - 1.0f;
-
-    if (x% 5 == 0|| y%3 ==0)
-    	return ;
-    // calculate simple sine wave pattern
-  //  float freq = 4.0f;
-  //  float w = sinf(u*freq + time) * cosf(v*freq + time) * 0.5f;
-
-    // write output vertex
- // pos[y*width+x] = make_float4(u, w, v, 1.0f);  (x,z,y,alpha);
-
-    if(CAMode ==0){ //vonneuman
-    	  pos[y*mesh_width+x] = make_float4(u, 0.5f, v, 1.0f);
-
-	}else {
-		  pos[y*mesh_width+x] = make_float4(u, 1.0f, v, 1.0f);
-
-	}
-}
-
-
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
 ////////////////////////////////////////////////////////////////////////////////
@@ -423,7 +320,7 @@ int main(int argc, char **argv)
 
 	//initVariable();
 	initCell2D(CA_VON_NEUMANN);
-
+	initSurface();
 
 	//cout<<" id = 551 [x,y]= [" << AllCells[551].CellPos.x<<","<<AllCells[551].CellPos.y<< "]";
     //cout<< "\n neighbor: ";
@@ -527,6 +424,7 @@ void display()
 		return;
 	}
 	*/
+
     sdkStartTimer(&timer);
     int arraycellsize = MAXX*MAXY*sizeof(CellType);
     checkCudaErrors(cudaMalloc((CellType**)&AllCells_device,arraycellsize));
@@ -561,6 +459,7 @@ void display()
     glColor3f(1.0, 0.0, 0.0);
     glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
     glDisableClientState(GL_VERTEX_ARRAY);
+
 /*
     //draw float
     glPointSize(2.0f);
@@ -572,6 +471,24 @@ void display()
 	glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
 	glDisableClientState(GL_VERTEX_ARRAY);
 */
+
+    if(showSurface){
+    	glGenBuffers(1, &surfaceVBO);
+		glBindBuffer(GL_ARRAY_BUFFER, surfaceVBO);
+		unsigned int size = MAXX * MAXY  * 4 * sizeof(float);
+		glBufferData(GL_ARRAY_BUFFER, size, surfacePos, GL_STATIC_DRAW);
+
+
+   // 	glBindBuffer(GL_ARRAY_BUFFER, surfaceVBO);
+		glVertexPointer(4, GL_FLOAT, 0, 0);
+
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glColor3f(0.0, 0.0, 1.0);
+		glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
+		glDisableClientState(GL_VERTEX_ARRAY);
+
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
     glutSwapBuffers();
 
     g_fAnim += 0.01f;
@@ -631,7 +548,7 @@ void cleanup()
 
 
 	free(AllCells_host);
-	free(AllFloats);
+	free(AllFloats_host);
 //	free(neighbor_index);
 	free(cell_index_host);
 	//free(nextState_h);

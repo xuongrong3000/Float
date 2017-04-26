@@ -130,6 +130,9 @@ float4 *surfacePos;
 GLuint surfaceVBO;
 bool showSurface = true;
 
+float *floatcolorred;
+float *floatcolorgreen;
+float *floatcolorblue;
 void initCell2D(int CAMode){
 	long tempid = 0;
 	int num_inactive = 0;
@@ -201,7 +204,9 @@ void initCell2D(int CAMode){
 }
 
 void initFloat(){
-
+	floatcolorred = (float *)malloc(num_floats*sizeof(float));
+	floatcolorgreen =(float *)malloc(num_floats*sizeof(float));
+	floatcolorblue = (float *)malloc(num_floats*sizeof(float));
 	for (int k=0;k<num_floats; k++){
 		FloatType tempfloattype;
 		tempfloattype.trajectory = (FloatTrajectoryPoint*)malloc (MAX_TRAJECTORY_SIZE *sizeof(FloatTrajectoryPoint));
@@ -231,7 +236,10 @@ void initFloat(){
 	    tempfloattype.floatState = DRIFT;
 	    AllFloats_host[k] = tempfloattype;
 	//  memcpy(cell_index_host[i+(j*MAXX)].id, tempindex, NUM_NEIGHBOR * sizeof(long)); //CA Diep change size
-	 }
+	    floatcolorred[k] = (float)(rand()%100)/100;
+	    floatcolorblue[k]  = (float)(rand()%100)/100;
+	    floatcolorgreen[k]  = (float)(rand()%100)/100;
+	}
 }
 
 
@@ -375,13 +383,11 @@ int main(int argc, char **argv)
 		cudaGLSetGLDevice(gpuGetMaxGflopsDeviceId());
 	}
 
-
 	glutDisplayFunc(display);
 	glutKeyboardFunc(keyboard);
 	glutMouseFunc(mouse);
 	glutMotionFunc(motion);
 	glutCloseFunc(cleanup);
-
 
 	createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
 // createVBO(&float_vbo, &float_vbo_cuda_resource, cudaGraphicsMapFlagsWriteDiscard);
@@ -530,10 +536,8 @@ void display()
 			glVertexPointer(4, GL_FLOAT, 0, 0);
 
 			glEnableClientState(GL_VERTEX_ARRAY);
-			float tempgreen = (float)(rand()%100)/100;
-			float tempred = (float)(rand()%100)/100;
-			float tempblue = (float)(rand()%100)/100;
-			glColor3f(tempred, tempgreen, tempblue);
+
+			glColor3f(floatcolorred[k] , floatcolorgreen[k] , floatcolorblue[k] );
 
 			glDrawArrays(GL_LINE_STRIP, 0, AllFloats_host[k].trajectory_size);
 			glDisableClientState(GL_VERTEX_ARRAY);

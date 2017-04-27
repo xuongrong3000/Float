@@ -47,7 +47,6 @@
 //#include "kernel.cu"
 #include "defines.h"
 
-#include <boost/multi_array.hpp>
 #include <cassert>
 
 
@@ -55,19 +54,14 @@
 #define THRESHOLD          0.30f
 #define REFRESH_DELAY     10 //ms
 
-int MAXX=128;
-int MAXY=128;
-int MAXZ=128;
+int MAXX=16;
+int MAXY=16;
+int MAXZ=16;
 
-int CELLSIZEX=1.0;
-int CELLSIZEY=1.0;
-
-using namespace std;
-using namespace boost;
 ////////////////////// struct
 
 //extern __device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
-extern __global__ void game_of_life_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
+extern __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device);
 //extern __global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode);
 
 //extern __global__ void runfloat(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
@@ -116,7 +110,7 @@ void *d_float_vbo_buffer = NULL;
 ////////////////// bien toan cuc luu tru thong tin
 
 bool showFloat = true;
-int num_floats = 5;
+int num_floats = 4;
 FloatType *AllFloats_host = NULL;
 FloatType *AllFloats_device;
 
@@ -133,6 +127,29 @@ bool showSurface = true;
 float *floatcolorred;
 float *floatcolorgreen;
 float *floatcolorblue;
+
+
+////////////////////////////////////////////////////////////////////////////////
+// declaration, forward
+void cleanup();
+
+// GL functionality
+bool initGL(int *argc, char **argv);
+void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
+               unsigned int vbo_res_flags);
+void deleteVBO(GLuint *vbo, struct cudaGraphicsResource *vbo_res);
+
+// rendering callbacks
+void display();
+void keyboard(unsigned char key, int x, int y);
+void mouse(int button, int state, int x, int y);
+void motion(int x, int y);
+void timerEvent(int value);
+void computeFPS();
+// Cuda functionality
+void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *cells_d,Index * index_device);
+
+
 void initCell2D(int CAMode){
 	long tempid = 0;
 	int num_inactive = 0;
@@ -156,9 +173,6 @@ void initCell2D(int CAMode){
 	    		  num_inactive ++;
 	    	  }
 	    	  tempid++;
-	    	  //Flat[x + HEIGHT* (y + WIDTH* z)]
-//	    	  The algorithm is mostly the same. If you have a 3D array Original[HEIGHT, WIDTH, DEPTH] then you could turn it into Flat[HEIGHT * WIDTH * DEPTH] by
-//	    	  Flat[x + WIDTH * (y + DEPTH * z)] = Original[x, y, z]
 	        }
 	    }
 	   // cout << " tempid = " <<tempid;
@@ -200,6 +214,101 @@ void initCell2D(int CAMode){
 				}
 	    	}
 	    }
+//	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
+}
+
+void initCell3D(int CAMode){
+	long tempid = 0;
+	int num_inactive = 0;
+	for(int k=0;k<MAXZ;k++){
+	    for(int j = 0; j < MAXY; j++){
+	        for(int i = 0; i < MAXX; i++)
+	        {
+	    	  Position temp;
+	    	  temp.x = (float)i/MAXX ;
+	    	  temp.y = (float)j/MAXY ;
+	    	  temp.z = (float)k/MAXZ ;
+
+	    	  AllCells_host[i+MAXZ*(j+MAXY*k)].id = tempid;
+	    	  AllCells_host[i+MAXZ*(j+MAXY*k)].CellPos = temp;
+	    	  int state  = rand() % 100 ;
+	    //	  cout << " \ni+MAXZ*(j+MAXY*k)=  " <<i+MAXZ*(j+MAXY*k) << " tempid="<<tempid;
+	    	  if (state %4 ==0) { //Diep random init
+	    		  AllCells_host[i+MAXZ*(j+MAXY*k)].state = NORMAL ;
+	    	//	  cout << " \n NORMAL id = " <<tempid;
+	    	  }else {
+	    		  AllCells_host[i+MAXZ*(j+MAXY*k)].state = INACTIVE ;
+	    	//	  cout << " \n INACTIVE id = " <<tempid;
+	    		  num_inactive ++;
+	    	  }
+	    	  tempid++;
+	    	  //Flat[x + HEIGHT* (y + WIDTH* z)]
+//	    	  The algorithm is mostly the same. If you have a 3D array Original[HEIGHT, WIDTH, DEPTH] then you could turn it into Flat[HEIGHT * WIDTH * DEPTH] by
+//	    	  Flat[x + WIDTH * (y + DEPTH * z)] = Original[x, y, z]
+
+			}//end for i MAXX
+    	}//end for j MAXY
+	}//end for k MAXZ
+
+	//    cout << " tempid = " <<tempid;
+	    if(CAMode==CA_VON_NEUMANN){ //6 neighbor 3D
+	    	for (int k=0; k<MAXZ;k++){
+				for(int j = 0; j < MAXY; j++){
+				   for(int i = 0; i < MAXX; i++){
+					   long tempindex[NUM_NEIGHBOR];
+
+					   if (i>0){//left(x) = (x - 1) % M
+						   tempindex[0] = AllCells_host[((i+MAXZ*(j+MAXY*k))-1)].id ;
+					   }else {
+						   tempindex[0] = INVALID_ID ;
+					   }
+					   if (i<MAXX-1){//right(x) = (x + 1) % M
+						   tempindex[1] = AllCells_host[((i+MAXZ*(j+MAXY*k))+1)].id ;
+					   }else{
+						   tempindex[1] = INVALID_ID ;
+					   }
+					   if (j>0){//above(x) = (x - M) % (M * N)
+						   tempindex[2] = AllCells_host[((i+MAXZ*(j-1+MAXY*k)))].id ;
+					   }else {
+						   tempindex[2] = INVALID_ID ;
+					   }
+					   if (j<MAXY-1){//below(x) = (x + M) % (M * N)
+						   tempindex[3] = AllCells_host[((i+MAXZ*(j+1+MAXY*k)))].id ;
+					   }else {
+						   tempindex[3] = INVALID_ID ;
+					   }
+					   if (k>0){//behind (x) = (x - M) % (M * N)
+						   tempindex[4] = AllCells_host[(i+MAXZ*(j+MAXY*(k-1)))].id ;
+					   }else {
+						   tempindex[4] = INVALID_ID ;
+					   }
+					   if (k<MAXZ-1){//front (x) = (x + M) % (M * N)
+						   tempindex[5] = AllCells_host[(i+MAXZ*(j+MAXY*(k+1)))].id ;
+					   }else {
+						   tempindex[5] = INVALID_ID ;
+					   }
+
+					   memcpy(cell_index_host[i+MAXZ*(j+MAXY*k)].id, tempindex, NUM_NEIGHBOR * sizeof(long)); //CA Diep change size
+					//   cell_index_host[i+(j*MAXX)].id = tempindex;
+
+					 //  if(i==0&&j==1&&k==1){
+					/*	   cout <<"\n "<<k<<j<<i <<"|i+MAXZ*(j+MAXY*k)= " << i+MAXZ*(j+MAXY*k) << " AllCells id= " <<AllCells_host[i+MAXZ*(j+MAXY*k)].id << " \n neightbors: ";
+						   for (int de=0;de<NUM_NEIGHBOR;de++){
+							   cout << de << ":"<< tempindex[de]<< " |" ;
+						   }*/
+					//   }
+				/*	   if(i==1&&j==1&&k==1){
+						   cout << "\ni+MAXZ*(j+MAXY*k)= " << i+i+MAXZ*(j+MAXY*k) << " AllCells id= " <<AllCells_host[i+MAXZ*(j+MAXY*k)].id << " \n neightbors: ";
+						   for (int de=0;de<NUM_NEIGHBOR;de++){
+							   cout << de << ":"<< tempindex[de]<< " |" ;
+						   }
+					   }
+				*/
+					}//end for i MAXX
+				}//end for j MAXY
+	    	}//end for k MAXZ
+	    }//end if CA Mode
+
 //	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
 
@@ -304,26 +413,6 @@ __device__ void computeCell(FloatState *nowState_d, int nodeIndex, canaux *chann
 */
 
 
-////////////////////////////////////////////////////////////////////////////////
-// declaration, forward
-void cleanup();
-
-// GL functionality
-bool initGL(int *argc, char **argv);
-void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
-               unsigned int vbo_res_flags);
-void deleteVBO(GLuint *vbo, struct cudaGraphicsResource *vbo_res);
-
-// rendering callbacks
-void display();
-void keyboard(unsigned char key, int x, int y);
-void mouse(int button, int state, int x, int y);
-void motion(int x, int y);
-void timerEvent(int value);
-void computeFPS();
-// Cuda functionality
-void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *cells_d,Index * index_device);
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
@@ -339,8 +428,8 @@ int main(int argc, char **argv)
 	sdkCreateTimer(&timer);
 
 
-	int arraycellsize = MAXX*MAXY*sizeof(CellType);
-	int arrayindex = MAXX*MAXY*sizeof(Index);
+	int arraycellsize = MAXX*MAXY*MAXZ*sizeof(CellType);
+	int arrayindex = MAXX*MAXY*MAXZ*sizeof(Index);
 	int arrayfloatsize = num_floats*sizeof(FloatType);
 		//Allocating memory of host variables
 	AllCells_host = (CellType*) malloc(arraycellsize);
@@ -349,7 +438,8 @@ int main(int argc, char **argv)
 		//Allocating memory to device variable
 
 	//initVariable();
-	initCell2D(CA_VON_NEUMANN);
+	//initCell2D(CA_VON_NEUMANN);
+	initCell3D(CA_VON_NEUMANN);
 	initSurface();
 	initFloat();
 
@@ -361,10 +451,8 @@ int main(int argc, char **argv)
 	checkCudaErrors(cudaMalloc(( Index** ) &cell_index_device,arrayindex));
 	checkCudaErrors(cudaMemcpy(cell_index_device, cell_index_host, arrayindex, cudaMemcpyHostToDevice));
 
-
 	//cout<<" id = 551 [x,y]= [" << AllCells[551].CellPos.x<<","<<AllCells[551].CellPos.y<< "]";
     //cout<< "\n neighbor: ";
-
 
 	if (false == initGL(&argc, argv))
 	{
@@ -396,8 +484,6 @@ int main(int argc, char **argv)
 
 }
 
-
-
 ////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
 ////////////////////////////////////////////////////////////////////////////////
@@ -413,9 +499,9 @@ void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *Cel
     //printf("CUDA mapped VBO: May access %ld bytes\n", num_bytes);
 
     // execute the kernel game_of_life_kernel
-	dim3 block(8, 8, 1);
-	dim3 grid(mesh_width / block.x, mesh_height / block.y, 1);
-	game_of_life_kernel<<< grid, block>>>(dptr, mesh_width,mesh_length, modeCA,Cells_device,index_device);
+	dim3 block(8, 8, 8);
+	dim3 grid(MAXX / block.x, MAXY / block.y, MAXZ/block.z);
+	game_of_life_kernel<<< grid, block>>>(dptr, MAXX,MAXY,MAXZ, modeCA,Cells_device,index_device);
 
     // unmap buffer object
     checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
@@ -434,8 +520,8 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
     glBindBuffer(GL_ARRAY_BUFFER, *vbo);
 
     // initialize buffer object
-  //*diep*  unsigned int size = mesh_width * mesh_height * 4 * sizeof(float);
-    unsigned int size = mesh_width * mesh_height  * 4 * sizeof(float);
+
+    unsigned int size = MAXX * MAXY * MAXZ  * 4 * sizeof(float);
     glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -445,8 +531,6 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
 
     SDK_CHECK_ERROR_GL();
 }
-
-
 
 ////////////////////////////////////////////////////////////////////////////////
 //! Display callback
@@ -484,21 +568,9 @@ void display()
     glVertexPointer(4, GL_FLOAT, 0, 0);
 
     glEnableClientState(GL_VERTEX_ARRAY);
-    glColor3f(1.0, 0.0, 0.0);
-    glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
+    glColor4f(1.0, 0.0, 0.0,0.5f);
+    glDrawArrays(GL_POINTS, 0, MAXX*MAXY*MAXZ);
     glDisableClientState(GL_VERTEX_ARRAY);
-
-/*
-    //draw float
-    glPointSize(2.0f);
-	glBindBuffer(GL_ARRAY_BUFFER, float_vbo);
-	glVertexPointer(4, GL_FLOAT, 0, 0);
-
-	glEnableClientState(GL_VERTEX_ARRAY);
-	glColor3f(0.0, 1.0, 0.0);
-	glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
-	glDisableClientState(GL_VERTEX_ARRAY);
-*/
 
     if(showSurface){
     	glGenBuffers(1, &surfaceVBO);
@@ -506,13 +578,12 @@ void display()
 		unsigned int size = MAXX * MAXY  * 4 * sizeof(float);
 		glBufferData(GL_ARRAY_BUFFER, size, surfacePos, GL_STATIC_DRAW);
 
-
    // 	glBindBuffer(GL_ARRAY_BUFFER, surfaceVBO);
 		glVertexPointer(4, GL_FLOAT, 0, 0);
 
 		glEnableClientState(GL_VERTEX_ARRAY);
-		glColor3f(0.0, 0.0, 1.0);
-		glDrawArrays(GL_POINTS, 0, mesh_width * mesh_height);
+		glColor4f(0.0, 0.0, 1.0f,1.0f);
+		glDrawArrays(GL_POINTS, 0, MAXX*MAXY);
 		glDisableClientState(GL_VERTEX_ARRAY);
 
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -530,16 +601,12 @@ void display()
 				floatPos[i] = make_float4(AllFloats_host[k].trajectory[i].FloatPos.x, AllFloats_host[k].trajectory[i].FloatPos.z, AllFloats_host[k].trajectory[i].FloatPos.y, 1.0f);
 			}
 			glBufferData(GL_ARRAY_BUFFER, trajecsize, floatPos, GL_STATIC_DRAW);
-
-
 	   // 	glBindBuffer(GL_ARRAY_BUFFER, surfaceVBO);
 			glVertexPointer(4, GL_FLOAT, 0, 0);
-
 			glEnableClientState(GL_VERTEX_ARRAY);
-
-			glColor3f(floatcolorred[k] , floatcolorgreen[k] , floatcolorblue[k] );
-
+			glColor4f(floatcolorred[k] , floatcolorgreen[k] , floatcolorblue[k] ,1.0f);
 			glDrawArrays(GL_LINE_STRIP, 0, AllFloats_host[k].trajectory_size);
+		//	void glutWireSphere(GLdouble radius, GLint slices, GLint stacks);
 			glDisableClientState(GL_VERTEX_ARRAY);
 
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -599,17 +666,18 @@ void cleanup()
     // flushed before the application exits
     cudaDeviceReset();
 
-	cudaFree(cell_index_device);
+    cudaFree(AllFloats_device);
 	cudaFree(AllCells_device);
+	cudaFree(cell_index_device);
 
-
-	free(AllCells_host);
 	free(AllFloats_host);
-//	free(neighbor_index);
+	free(AllCells_host);
 	free(cell_index_host);
-	//free(nextState_h);
-
-
+	free(floatPos);
+	free(surfacePos);
+	free(floatcolorred);
+	free(floatcolorgreen);
+	free(floatcolorblue);
 }
 
 
@@ -621,10 +689,8 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
     switch (key)
     {
         case (27) :
-
                 glutDestroyWindow(glutGetWindow());
                 return;
-
     }
 }
 
@@ -718,6 +784,8 @@ bool initGL(int *argc, char **argv)
     // Accept fragment if it closer to the camera than the former one
     glDepthFunc(GL_LESS);
 
+    glEnable(GL_BLEND); //enable alpha color
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//enable alpha color
 
     // viewport
     glViewport(0, 0, window_width, window_height);

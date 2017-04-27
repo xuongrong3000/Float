@@ -1,3 +1,4 @@
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,13 +30,13 @@ struct Position {
 #define NORMAL 1
 #define DRIFT 2
 
-#define MAX_MEASURE_SIZE 10
-#define MAX_TRAJECTORY_SIZE 10
+#define MAX_MEASURE_SIZE 6
+#define MAX_TRAJECTORY_SIZE 6
 
 //cell
 #define CA_VON_NEUMANN 1
 #define CA_MOORE 2
-#define NUM_NEIGHBOR 4
+#define NUM_NEIGHBOR 6
 
 #define INVALID_ID 2111111111
 
@@ -44,10 +45,11 @@ struct Position {
 const unsigned int window_width  = 512;
 const unsigned int window_height = 512;
 
+/*
 const unsigned int mesh_width    = 128;
 const unsigned int mesh_height   = 128;
 const unsigned int mesh_length   = 128;
-
+*/
 typedef struct {
 	float pressure;
 	float salinity;

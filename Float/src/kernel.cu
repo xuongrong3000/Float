@@ -10,38 +10,19 @@ __global__ void runfloat(float4 *pos, unsigned int maxx,unsigned int maxy, unsig
 
 }
 
-__device__ void stepCell(unsigned int idx, int CAMode, CellType *Cells_device,Index * index_device){
+__device__ void stepCell(unsigned long long int idx, int CAMode, CellType *Cells_device,Index * index_device){
 //	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f);
-	    	if(index_device[idx].id[0]!=INVALID_ID){
-	    		Cells_device[index_device[idx].id[0]].state ++;
-				Cells_device[index_device[idx].id[0]].state %=2;
-	    	}
-	    	if(index_device[idx].id[1]!=INVALID_ID){
-				Cells_device[index_device[idx].id[1]].state ++;
-				Cells_device[index_device[idx].id[1]].state %=2;
+	for (int i=0; i<NUM_NEIGHBOR;i++){
+		if(index_device[idx].id[i]!=INVALID_ID)
+		{
+		/*	if(idx ==10){
+				printf("\n before index idx=10: %d", Cells_device[index_device[idx].id[i]].state);
 			}
-	    	if(index_device[idx].id[2]!=INVALID_ID){
-				Cells_device[index_device[idx].id[2]].state ++;
-				Cells_device[index_device[idx].id[2]].state %=2;
-			}
-	    	if(index_device[idx].id[3]!=INVALID_ID){
-				Cells_device[index_device[idx].id[3]].state ++;
-				Cells_device[index_device[idx].id[3]].state %=2;
-			}
-	    	if(index_device[idx].id[4]!=INVALID_ID){
-				Cells_device[index_device[idx].id[4]].state ++;
-				Cells_device[index_device[idx].id[4]].state %=2;
-			}
-	    	if(index_device[idx].id[5]!=INVALID_ID){
-				Cells_device[index_device[idx].id[5]].state ++;
-				Cells_device[index_device[idx].id[5]].state %=2;
-			}
-
-
-	 //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
-	 //	Cells_device[y*mesh_width+x].state == INACTIVE
-	    	return ;
-
+		*/
+			Cells_device[index_device[idx].id[i]].state ++;
+			Cells_device[index_device[idx].id[i]].state %=2;
+		}
+	}
 }
 
 __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device)
@@ -54,13 +35,9 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int 
 	// global unique thread index, block dimension uses only x-coordinate
 	const unsigned long long int threadId = blockId * blockDim.x + threadIdx.x;
 */
-	int blockId = blockIdx.x
-	             + blockIdx.y * gridDim.x
-	             + gridDim.x * gridDim.y * blockIdx.z;
-	int threadId 	= blockId * (blockDim.x * blockDim.y * blockDim.z)
-	                 + (threadIdx.z * (blockDim.x * blockDim.y))
-	                 + (threadIdx.y * blockDim.x)
-	                 + threadIdx.x;
+
+	unsigned long long int threadId 	= (blockIdx.x + blockIdx.y * gridDim.x 	+ gridDim.x * gridDim.y * blockIdx.z ) * (blockDim.x * blockDim.y * blockDim.z)
+											+ (threadIdx.z * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
 
    /* unsigned long long int x = blockIdx.x*blockDim.x + threadIdx.x;
     unsigned long long int y = blockIdx.y*blockDim.y + threadIdx.y;
@@ -69,14 +46,18 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int 
 //    printf("\n in Kernel z,y,x=[%d][%d][%d] index0: %ld  cellID: %ld  state:%d",z,y,x,index_device[x+maxz*(y+maxy*z)].id[0],Cells_device[x+maxz*(y+maxy*z)].id,Cells_device[x+maxz*(y+maxy*z)].state);
  //   printf("\n in Kernel y,x [%d][%d] position: %2f  - %2f   id: %ld  state:%d ",y,x,Cells_device[y*mesh_width+x].CellPos.x,Cells_device[y*mesh_width+x].CellPos.y,Cells_device[y*mesh_width+x].id,Cells_device[y*mesh_width+x].state);
     //Flat[x + HEIGHT* (y + WIDTH* z)]
-    if(Cells_device[x+maxz*(y+maxy*z)].state == INACTIVE ){
-    	//pos[x+maxz*(y+maxy*z)] = make_float4(0,0,0,1.0f);
-    	pos[x+maxz*(y+maxy*z)] = make_float4(Cells_device[x+maxz*(y+maxy*z)].CellPos.x, Cells_device[x+maxz*(y+maxy*z)].CellPos.z, Cells_device[x+maxz*(y+maxy*z)].CellPos.y, 1.0f);
+    if(Cells_device[threadId].state == INACTIVE ){
+    	pos[threadId] = make_float4(0,0,0,1.0f);
+ //   	pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, Cells_device[threadId].CellPos.z, Cells_device[threadId].CellPos.y, 1.0f);
  //   	Cells_device[index_device[y*mesh_width+x].id[0]].state = NORMAL;
  //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
     //	Cells_device[y*mesh_width+x].state == INACTIVE
-    	stepCell(x+maxz*(y+maxy*z),CAMode,Cells_device,index_device);
+    	stepCell(threadId,CAMode,Cells_device,index_device);
+    }else{
+    	 pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, Cells_device[threadId].CellPos.z, Cells_device[threadId].CellPos.y, 1.0f);
+		 Cells_device[threadId].state = INACTIVE;
     }
+
 	// get neighbor
   //  if (x% 5 == 0|| y%3 ==0) //not visible - skip it
   //  	return ;
@@ -84,13 +65,7 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int 
     // write output vertex
  // pos[y*width+x] = make_float4(u, w, v, 1.0f);  (x,z,y,alpha);
   //  if( Cells_d[y*mesh_width+x].state==NORMAL|| Cells_d[y*mesh_width+x].state==DRIFT){
-		if(CAMode ==0){ //vonneuman
-			  pos[x+maxz*(y+maxy*z)] = make_float4(Cells_device[x+maxz*(y+maxy*z)].CellPos.x, Cells_device[x+maxz*(y+maxy*z)].CellPos.z, Cells_device[x+maxz*(y+maxy*z)].CellPos.y, 1.0f);
-			  Cells_device[x+maxz*(y+maxy*z)].state == INACTIVE;
-		}else {
-			  pos[x+maxz*(y+maxy*z)] = make_float4(Cells_device[x+maxz*(y+maxy*z)].CellPos.x, Cells_device[x+maxz*(y+maxy*z)].CellPos.z, Cells_device[x+maxz*(y+maxy*z)].CellPos.y, 1.0f);
-			  Cells_device[x+maxz*(y+maxy*z)].state == INACTIVE;
-		}
+
    // }
 }
 

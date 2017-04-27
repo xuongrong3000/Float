@@ -49,14 +49,11 @@
 
 #include <cassert>
 
-
-#define MAX_EPSILON_ERROR 10.0f
-#define THRESHOLD          0.30f
 #define REFRESH_DELAY     10 //ms
 
-int MAXX=16;
-int MAXY=16;
-int MAXZ=16;
+int MAXX=32;
+int MAXY=32;
+int MAXZ=32;
 
 ////////////////////// struct
 
@@ -231,7 +228,7 @@ void initCell3D(int CAMode){
 
 	    	  AllCells_host[i+MAXZ*(j+MAXY*k)].id = tempid;
 	    	  AllCells_host[i+MAXZ*(j+MAXY*k)].CellPos = temp;
-	    	  int state  = rand() % 100 ;
+	    	  int state  = rand() % 200 ;
 	    //	  cout << " \ni+MAXZ*(j+MAXY*k)=  " <<i+MAXZ*(j+MAXY*k) << " tempid="<<tempid;
 	    	  if (state %4 ==0) { //Diep random init
 	    		  AllCells_host[i+MAXZ*(j+MAXY*k)].state = NORMAL ;
@@ -309,7 +306,7 @@ void initCell3D(int CAMode){
 	    	}//end for k MAXZ
 	    }//end if CA Mode
 
-//	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
+	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
 
 void initFloat(){
@@ -333,9 +330,9 @@ void initFloat(){
 			    temppoint.measure[i] = tempmes;
 		    }
 		    Position temppos;
-		    temppos.x = (float)(rand() % 100)/100 ;
-		    temppos.y = (float)(rand() % 100)/100 ;
-		    temppos.z = (float)(rand() % 20)/21 ;
+		    temppos.x = (float)(rand() % MAXX)/MAXX ;
+		    temppos.y = (float)(rand() % MAXY)/MAXY ;
+		    temppos.z = (float)(rand() % MAXZ)/MAXZ ;
 		    //add date
 
 		    temppoint.FloatPos = temppos;
@@ -549,7 +546,7 @@ void display()
 
     // run CUDA kernel to generate vertex positions
     runCuda(&cuda_vbo_resource,0,AllCells_device,cell_index_device);
- //   runCuda(&float_vbo_cuda_resource,1,AllCells_device);
+
   //  cudaDeviceSynchronize();
  //   checkCudaErrors(cudaMemcpy(AllCells_host,AllCells_device, arraycellsize, cudaMemcpyDeviceToHost));
 

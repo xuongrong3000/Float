@@ -36,7 +36,7 @@ struct Position {
 //cell
 #define CA_VON_NEUMANN 1
 #define CA_MOORE 2
-#define NUM_NEIGHBOR 6
+#define NUM_NEIGHBOR 4
 
 #define INVALID_ID 2111111111
 

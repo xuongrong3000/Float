@@ -10,8 +10,8 @@ __global__ void runfloat(float4 *pos, unsigned int maxx,unsigned int maxy, unsig
 
 }
 
-__device__ void stepCell(unsigned long long int idx, int CAMode, CellType *Cells_device,Index * index_device){
-//	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f);
+__device__ void stepCell(unsigned long long int idx, int CAMode, CellType *Cells_device,Index * index_device,bool showMode){
+//	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f); ||(!showMode&&i<4)
 	for (int i=0; i<NUM_NEIGHBOR;i++){
 		if(index_device[idx].id[i]!=INVALID_ID)
 		{
@@ -25,7 +25,7 @@ __device__ void stepCell(unsigned long long int idx, int CAMode, CellType *Cells
 	}
 }
 
-__global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device)
+__global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device,bool showMode)
 {
 	// __syncthreads();
 /*	const unsigned long long int blockId = blockIdx.x //1D
@@ -35,10 +35,30 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int 
 	// global unique thread index, block dimension uses only x-coordinate
 	const unsigned long long int threadId = blockId * blockDim.x + threadIdx.x;
 */
-
-	unsigned long long int threadId 	= (blockIdx.x + blockIdx.y * gridDim.x 	+ gridDim.x * gridDim.y * blockIdx.z ) * (blockDim.x * blockDim.y * blockDim.z)
+	unsigned long long int threadId ;
+	if (showMode){ //3D
+		threadId 	= (blockIdx.x + blockIdx.y * gridDim.x 	+ gridDim.x * gridDim.y * blockIdx.z ) * (blockDim.x * blockDim.y * blockDim.z)
 											+ (threadIdx.z * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+		if(Cells_device[threadId].state == INACTIVE ){
+	     	pos[threadId] = make_float4(0,0,0,1.0f);
+	     	stepCell(threadId,CAMode,Cells_device,index_device,showMode);
+		}else{
+		 pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, Cells_device[threadId].CellPos.z, Cells_device[threadId].CellPos.y, 1.0f);
+		 Cells_device[threadId].state = INACTIVE;
+		}
+	}else { //2D
+		unsigned long long int x = blockIdx.x*blockDim.x + threadIdx.x;
+		unsigned long long int y = blockIdx.y*blockDim.y + threadIdx.y;
+		threadId = y*maxx + x;
 
+		if(Cells_device[threadId].state == INACTIVE ){
+			pos[threadId] = make_float4(0,0,0,1.0f);
+			stepCell(threadId,CAMode,Cells_device,index_device,showMode);
+		}else{
+			pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, 0.5f, Cells_device[threadId].CellPos.y, 1.0f);
+			Cells_device[threadId].state = INACTIVE;
+		}
+	}
    /* unsigned long long int x = blockIdx.x*blockDim.x + threadIdx.x;
     unsigned long long int y = blockIdx.y*blockDim.y + threadIdx.y;
     unsigned long long int z = blockIdx.z*blockDim.z + threadIdx.z;
@@ -46,17 +66,12 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int 
 //    printf("\n in Kernel z,y,x=[%d][%d][%d] index0: %ld  cellID: %ld  state:%d",z,y,x,index_device[x+maxz*(y+maxy*z)].id[0],Cells_device[x+maxz*(y+maxy*z)].id,Cells_device[x+maxz*(y+maxy*z)].state);
  //   printf("\n in Kernel y,x [%d][%d] position: %2f  - %2f   id: %ld  state:%d ",y,x,Cells_device[y*mesh_width+x].CellPos.x,Cells_device[y*mesh_width+x].CellPos.y,Cells_device[y*mesh_width+x].id,Cells_device[y*mesh_width+x].state);
     //Flat[x + HEIGHT* (y + WIDTH* z)]
-    if(Cells_device[threadId].state == INACTIVE ){
-    	pos[threadId] = make_float4(0,0,0,1.0f);
+
  //   	pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, Cells_device[threadId].CellPos.z, Cells_device[threadId].CellPos.y, 1.0f);
  //   	Cells_device[index_device[y*mesh_width+x].id[0]].state = NORMAL;
  //   	Cells_device[cell_index_device[y*mesh_width+x].id[0]].state %=2;
     //	Cells_device[y*mesh_width+x].state == INACTIVE
-    	stepCell(threadId,CAMode,Cells_device,index_device);
-    }else{
-    	 pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, Cells_device[threadId].CellPos.z, Cells_device[threadId].CellPos.y, 1.0f);
-		 Cells_device[threadId].state = INACTIVE;
-    }
+
 
 	// get neighbor
   //  if (x% 5 == 0|| y%3 ==0) //not visible - skip it

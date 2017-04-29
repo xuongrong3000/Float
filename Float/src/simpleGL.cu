@@ -49,16 +49,16 @@
 
 #include <cassert>
 
-#define REFRESH_DELAY     10 //ms
+#define REFRESH_DELAY     10 //ms //200 :slow  10: very fast
 
 int MAXX=32;
 int MAXY=32;
-int MAXZ=32;
+int MAXZ=1;
 
 ////////////////////// struct
 
 //extern __device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
-extern __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device);
+extern __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device,bool showMode);
 //extern __global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode);
 
 //extern __global__ void runfloat(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
@@ -70,8 +70,18 @@ extern __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsign
 #define FORCE (5.8f*DIM) // Force scale factor
 #define FR     4         // Force update radius
 */
+bool show3D = false ;
 
 float g_fAnim = 0.0;
+float g_fAnimInc = 0.01f;
+bool animFlag = true;
+
+// Auto-Verification Code
+int fpsCount = 0;        // FPS count for averaging
+int fpsLimit = 1;        // FPS limit for sampling
+
+float avgFPS = 0.0f;
+unsigned int frameCount = 0;
 
 // mouse controls
 int mouse_old_x, mouse_old_y;
@@ -81,12 +91,6 @@ float translate_z = -3.0;
 
 StopWatchInterface *timer = NULL;
 
-// Auto-Verification Code
-int fpsCount = 0;        // FPS count for averaging
-int fpsLimit = 1;        // FPS limit for sampling
-
-float avgFPS = 0.0f;
-unsigned int frameCount = 0;
 
 int *pArgc = NULL;
 char **pArgv = NULL;
@@ -156,16 +160,17 @@ void initCell2D(int CAMode){
 	    	  Position temp;
 	    	  temp.x = (float)i/MAXX ;
 	    	  temp.y = (float)j/MAXY ;
-
-	    	  AllCells_host[i+MAXY*j].id = tempid;
-	    	  AllCells_host[i+MAXY*j].CellPos = temp;
+	    	  temp.z = 0.5f;
+	    	  unsigned long long int index = i+MAXY*j;
+	    	  AllCells_host[index].id = tempid;
+	    	  AllCells_host[index].CellPos = temp;
 	    	  int state  = rand() % 100 ;
 	//    	  cout << " state = " <<state;
 	    	  if (state %4 ==0) { //Diep random init
-	    		  AllCells_host[i+MAXY*j].state = NORMAL ;
+	    		  AllCells_host[index].state = NORMAL ;
 	    	//	  cout << " \n NORMAL id = " <<tempid;
 	    	  }else {
-	    		  AllCells_host[i+MAXY*j].state = INACTIVE ;
+	    		  AllCells_host[index].state = INACTIVE ;
 	    	//	  cout << " \n INACTIVE id = " <<tempid;
 	    		  num_inactive ++;
 	    	  }
@@ -177,30 +182,30 @@ void initCell2D(int CAMode){
 	    	vector<long> neighbor ;
 	    	for(int j = 0; j < MAXY; ++j){
 			   for(int i = 0; i < MAXX; ++i)
-				{
+				{  unsigned long long int index = i+MAXY*j;
 				   long tempindex[NUM_NEIGHBOR];
 
 				   if (i>0){//left(x) = (x - 1) % M
-					   tempindex[0] = AllCells_host[((i+j*MAXX)-1)].id ;
+					   tempindex[0] = AllCells_host[index-1].id ;
 				   }else {
 					   tempindex[0] = INVALID_ID ;
 				   }
 				   if (i<MAXX-1){//right(x) = (x + 1) % M
-					   tempindex[1] = AllCells_host[((i+j*MAXX)+1)].id ;
+					   tempindex[1] = AllCells_host[index+1].id ;
 				   }else{
 					   tempindex[1] = INVALID_ID ;
 				   }
 				   if (j>0){//above(x) = (x - M) % (M * N)
-					   tempindex[2] = AllCells_host[((i+j*MAXX)-MAXX)%(MAXX*MAXY)].id ;
+					   tempindex[2] = AllCells_host[index-MAXX].id ;
 				   }else {
 					   tempindex[2] = INVALID_ID ;
 				   }
 				   if (j<MAXY-1){//below(x) = (x + M) % (M * N)
-					   tempindex[3] = AllCells_host[((i+j*MAXX)+MAXX)%(MAXX*MAXY)].id ;
+					   tempindex[3] = AllCells_host[index+MAXX].id ;
 				   }else {
 					   tempindex[3] = INVALID_ID ;
 				   }
-				   memcpy(cell_index_host[i+(j*MAXX)].id, tempindex, NUM_NEIGHBOR * sizeof(long)); //CA Diep change size
+				   memcpy(cell_index_host[index].id, tempindex, NUM_NEIGHBOR * sizeof(long)); //CA Diep change size
 				//   cell_index_host[i+(j*MAXX)].id = tempindex;
 
 		/*		   if(i==2&&j==0){
@@ -211,7 +216,7 @@ void initCell2D(int CAMode){
 				}
 	    	}
 	    }
-//	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
+	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
 
 void initCell3D(int CAMode){
@@ -220,21 +225,21 @@ void initCell3D(int CAMode){
 	for(int k=0;k<MAXZ;k++){
 	    for(int j = 0; j < MAXY; j++){
 	        for(int i = 0; i < MAXX; i++)
-	        {
+	        { unsigned long long int index = i+MAXZ*(j+MAXY*k);
 	    	  Position temp;
 	    	  temp.x = (float)i/MAXX ;
 	    	  temp.y = (float)j/MAXY ;
 	    	  temp.z = (float)k/MAXZ ;
 
-	    	  AllCells_host[i+MAXZ*(j+MAXY*k)].id = tempid;
-	    	  AllCells_host[i+MAXZ*(j+MAXY*k)].CellPos = temp;
+	    	  AllCells_host[index].id = tempid;
+	    	  AllCells_host[index].CellPos = temp;
 	    	  int state  = rand() % 200 ;
 	    //	  cout << " \ni+MAXZ*(j+MAXY*k)=  " <<i+MAXZ*(j+MAXY*k) << " tempid="<<tempid;
 	    	  if (state %4 ==0) { //Diep random init
-	    		  AllCells_host[i+MAXZ*(j+MAXY*k)].state = NORMAL ;
+	    		  AllCells_host[index].state = NORMAL ;
 	    	//	  cout << " \n NORMAL id = " <<tempid;
 	    	  }else {
-	    		  AllCells_host[i+MAXZ*(j+MAXY*k)].state = INACTIVE ;
+	    		  AllCells_host[index].state = INACTIVE ;
 	    	//	  cout << " \n INACTIVE id = " <<tempid;
 	    		  num_inactive ++;
 	    	  }
@@ -252,6 +257,7 @@ void initCell3D(int CAMode){
 	    	for (int k=0; k<MAXZ;k++){
 				for(int j = 0; j < MAXY; j++){
 				   for(int i = 0; i < MAXX; i++){
+
 					   long tempindex[NUM_NEIGHBOR];
 
 					   if (i>0){//left(x) = (x - 1) % M
@@ -306,7 +312,7 @@ void initCell3D(int CAMode){
 	    	}//end for k MAXZ
 	    }//end if CA Mode
 
-	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
+//	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
 
 void initFloat(){
@@ -433,12 +439,20 @@ int main(int argc, char **argv)
 	cell_index_host = (Index*) malloc(arrayindex);
 	AllFloats_host = (FloatType *) malloc(arrayfloatsize);
 		//Allocating memory to device variable
+	if(show3D){
+		initCell3D(CA_VON_NEUMANN);
+	}else{
+		initCell2D(CA_VON_NEUMANN);
+	}
+	//
+	if(showSurface){
+		initSurface();
+	}
 
-	//initVariable();
-	//initCell2D(CA_VON_NEUMANN);
-	initCell3D(CA_VON_NEUMANN);
-	initSurface();
-	initFloat();
+	if(showFloat){
+		initFloat();
+	}
+
 
 //	int arraycellsize = MAXX*MAXY*sizeof(CellType);
 	checkCudaErrors(cudaMalloc((CellType**)&AllCells_device,arraycellsize));
@@ -486,19 +500,15 @@ int main(int argc, char **argv)
 ////////////////////////////////////////////////////////////////////////////////
 void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *Cells_device,Index *index_device)
 {
-    // map OpenGL buffer object for writing from CUDA
     float4 *dptr;
 
     checkCudaErrors(cudaGraphicsMapResources(1, vbo_resource, 0));
     size_t num_bytes;
     checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void **)&dptr, &num_bytes,
                                                          *vbo_resource));
-    //printf("CUDA mapped VBO: May access %ld bytes\n", num_bytes);
-
-    // execute the kernel game_of_life_kernel
-	dim3 block(8, 8, 8);
+    dim3 block(8, 8, 1);
 	dim3 grid(MAXX / block.x, MAXY / block.y, MAXZ/block.z);
-	game_of_life_kernel<<< grid, block>>>(dptr, MAXX,MAXY,MAXZ, modeCA,Cells_device,index_device);
+	game_of_life_kernel<<< grid, block>>>(dptr, MAXX,MAXY,MAXZ, modeCA,Cells_device,index_device,show3D);
 
     // unmap buffer object
     checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
@@ -560,7 +570,7 @@ void display()
     glRotatef(rotate_y, 0.0, 1.0, 0.0);
 
     // render from the vbo
-    glPointSize(2.0f);
+    glPointSize(3.0f);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glVertexPointer(4, GL_FLOAT, 0, 0);
 
@@ -609,10 +619,16 @@ void display()
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
     	}
     }
+  //  glColor3f(1.0,0.0,0.0);
+  //	glLoadIdentity();
+ //	glutWireSphere( 0.05, 8, 4);
+ //	glFlush();
     glutSwapBuffers();
 
-    g_fAnim += 0.01f;
-
+    g_fAnim += g_fAnimInc;
+    if(animFlag) {
+  //      glutPostRedisplay();
+    }
     sdkStopTimer(&timer);
     computeFPS();
 }
@@ -688,7 +704,23 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
         case (27) :
                 glutDestroyWindow(glutGetWindow());
                 return;
+
+        case 'a': // toggle animation
+	    case 'A':
+            animFlag = (animFlag)?0:1;
+            break;
+	    case '-': // decrease the time increment for the CUDA kernel
+            g_fAnimInc -= 0.01;
+            break;
+	    case '+': // increase the time increment for the CUDA kernel
+	    	g_fAnimInc += 0.01;
+            break;
+	    case 'r': // reset the time increment
+	    	g_fAnimInc = 0.01;
+            break;
     }
+    // indicate the display must be redrawn
+     glutPostRedisplay();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

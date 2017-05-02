@@ -53,16 +53,9 @@
 
 int MAXX=32;
 int MAXY=32;
-int MAXZ=1;
+int MAXZ=32;
 
-////////////////////// struct
 
-//extern __device__ void stepCell(unsigned int idx, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
-extern __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device,bool showMode);
-//extern __global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode);
-
-//extern __global__ void runfloat(float4 *pos, unsigned int mesh_width,unsigned int mesh_length, int CAMode, CellType *Cells_device,Index * index_device);
-//extern __device__ void
 
 /*          2,147,483,648
 #define DT     0.09f     // Delta T for interative solver
@@ -70,11 +63,12 @@ extern __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsign
 #define FORCE (5.8f*DIM) // Force scale factor
 #define FR     4         // Force update radius
 */
-bool show3D = false ;
+bool show3D = true ;
 
 float g_fAnim = 0.0;
 float g_fAnimInc = 0.01f;
 bool animFlag = true;
+int runControl = 1;
 
 // Auto-Verification Code
 int fpsCount = 0;        // FPS count for averaging
@@ -82,6 +76,43 @@ int fpsLimit = 1;        // FPS limit for sampling
 
 float avgFPS = 0.0f;
 unsigned int frameCount = 0;
+
+
+GLint gFramesPerSecond = 0;
+static GLint Frames = 0;         // frames averaged over 1000mS
+  static GLuint Clock;             // [milliSeconds]
+  static GLuint PreviousClock = 0; // [milliSeconds]
+  static GLuint NextClock = 0;     // [milliSeconds]
+
+void FPS(void) {
+
+
+  ++Frames;
+  Clock = glutGet(GLUT_ELAPSED_TIME); //has limited resolution, so average over 1000mS
+  if ( Clock < NextClock ) return;
+
+  gFramesPerSecond = Frames/1; // store the averaged number of frames per second
+
+  PreviousClock = Clock;
+  NextClock = Clock+1000; // 1000mS=1S in the future
+  Frames=0;
+}
+
+void timerMeasure(int value)
+{
+  const int desiredFPS=100;
+  glutTimerFunc(1000/desiredFPS, timerMeasure, ++value);
+
+  //put your specific idle code here
+  //... this code will run at desiredFPS
+
+ // printf("numframe:%d  ",Frames);
+  //end your specific idle code here
+
+  FPS(); //only call once per frame loop to measure FPS
+  glutPostRedisplay();
+}
+
 
 // mouse controls
 int mouse_old_x, mouse_old_y;
@@ -115,6 +146,7 @@ int num_floats = 4;
 FloatType *AllFloats_host = NULL;
 FloatType *AllFloats_device;
 
+bool showCell = true;
 CellType *AllCells_host = NULL;
 CellType *AllCells_device;
 
@@ -139,6 +171,7 @@ bool initGL(int *argc, char **argv);
 void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
                unsigned int vbo_res_flags);
 void deleteVBO(GLuint *vbo, struct cudaGraphicsResource *vbo_res);
+extern __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device,bool showMode);
 
 // rendering callbacks
 void display();
@@ -339,7 +372,10 @@ void initFloat(){
 		    temppos.x = (float)(rand() % MAXX)/MAXX ;
 		    temppos.y = (float)(rand() % MAXY)/MAXY ;
 		    temppos.z = (float)(rand() % MAXZ)/MAXZ ;
-		    //add date
+
+		////////////////////
+		//   add date  /////
+		////////////////////
 
 		    temppoint.FloatPos = temppos;
 		    tempfloattype.trajectory[j] = temppoint;
@@ -390,32 +426,16 @@ void initSurface(){
 	  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(ushort)*3, pindices, GL_STATIC_DRAW);
 */
 }
-/*
-__global__ void stepCell(FloatState *nowState_d, FloatState *nextState_d, canaux *channels_d, int node_number)
-{
 
-	unsigned int x = blockIdx.x*blockDim.x + threadIdx.x;
-	unsigned int y = blockIdx.y*blockDim.y + threadIdx.y;
 
-	int idx = threadIdx.x + blockIdx.x * blockDim.x;
-
-	if (idx < node_number)
-	{
-	    nextState_d[idx] = computeCell(nowState_d, idx, channels_d, devStates);
+void runCudaLoop(int valueControl){
+//	cout << " value " << ":"<< valueControl;
+	if (valueControl==0){
+		//do nothing
+	}else{
+		runCuda(&cuda_vbo_resource,0,AllCells_device,cell_index_device);
 	}
 }
-*/
-
-/*
-
-
-__device__ void computeCell(FloatState *nowState_d, int nodeIndex, canaux *channels_d, curandState* devState_d)
-{
-
-}
-*/
-
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
@@ -488,12 +508,14 @@ int main(int argc, char **argv)
 	glutMotionFunc(motion);
 	glutCloseFunc(cleanup);
 
+//	glutTimerFunc(0,timerMeasure,0);
+
 	createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
-// createVBO(&float_vbo, &float_vbo_cuda_resource, cudaGraphicsMapFlagsWriteDiscard);
 
 	glutMainLoop();
 
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
@@ -553,9 +575,10 @@ void display()
 
     sdkStartTimer(&timer);
 
+	glutTimerFunc(1000/g_fAnim, runCudaLoop, runControl);
 
     // run CUDA kernel to generate vertex positions
-    runCuda(&cuda_vbo_resource,0,AllCells_device,cell_index_device);
+  //  runCuda(&cuda_vbo_resource,0,AllCells_device,cell_index_device);
 
   //  cudaDeviceSynchronize();
  //   checkCudaErrors(cudaMemcpy(AllCells_host,AllCells_device, arraycellsize, cudaMemcpyDeviceToHost));
@@ -570,15 +593,16 @@ void display()
     glRotatef(rotate_y, 0.0, 1.0, 0.0);
 
     // render from the vbo
-    glPointSize(3.0f);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glVertexPointer(4, GL_FLOAT, 0, 0);
+    if(showCell) {
+		glPointSize(3.0f);
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		glVertexPointer(4, GL_FLOAT, 0, 0);
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glColor4f(1.0, 0.0, 0.0,0.5f);
-    glDrawArrays(GL_POINTS, 0, MAXX*MAXY*MAXZ);
-    glDisableClientState(GL_VERTEX_ARRAY);
-
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glColor4f(1.0, 0.0, 0.0,0.5f);
+		glDrawArrays(GL_POINTS, 0, MAXX*MAXY*MAXZ);
+		glDisableClientState(GL_VERTEX_ARRAY);
+    }
     if(showSurface){
     	glGenBuffers(1, &surfaceVBO);
 		glBindBuffer(GL_ARRAY_BUFFER, surfaceVBO);
@@ -718,6 +742,16 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 	    case 'r': // reset the time increment
 	    	g_fAnimInc = 0.01;
             break;
+	    case 'f':showFloat = !showFloat;
+	    	break;
+	    case 's':
+	    case 'S':
+	    	runControl ++;
+	    	runControl %=2;
+	    	break;
+	    case 'z':
+	    	showSurface = !showSurface;
+	    	break;
     }
     // indicate the display must be redrawn
      glutPostRedisplay();

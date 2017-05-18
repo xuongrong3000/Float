@@ -5,9 +5,21 @@
 ////////////////////////////////////
 #include "defines.h"
 
+#define tempThreadhold = 6 // so sanh lon hon nho hon voi float, dung bao gio so sanh = xay ra loi logic
+/*
 __global__ void runfloat(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned maxz, int CAMode, CellType *Cells_device,Index * index_device)
 {
 
+}
+*/
+__device__ void stepCellSimulation(unsigned long long int idx, int CAMode, CellType *Cells_device,Index * index_device,unsigned int nbAcNeigh, float spreadval){
+
+	for (int i=0; i<NUM_NEIGHBOR;i++){
+		if(index_device[idx].id[i]!=INVALID_ID)
+		{
+			Cells_device[index_device[idx].id[i]].temperature += spreadval ;
+		}
+	}
 }
 
 __device__ void stepCellGameOfLife(unsigned long long int idx, int CAMode, CellType *Cells_device,Index * index_device,bool showMode){
@@ -25,6 +37,28 @@ __device__ void stepCellGameOfLife(unsigned long long int idx, int CAMode, CellT
 	}
 }
 
+__global__ void main_simulation(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz,int CAMode, CellType *Cells_device,Index * index_device){
+// only 3D simulation!
+	unsigned long long int threadId ;
+	threadId 	= (blockIdx.x + blockIdx.y * gridDim.x 	+ gridDim.x * gridDim.y * blockIdx.z ) * (blockDim.x * blockDim.y * blockDim.z)
+												+ (threadIdx.z * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+
+	if(Cells_device[threadId].temperature < 4.0 ){
+		pos[threadId] = make_float4(0.0f,0.0f,0.0f,0.0f);
+	}else{ //show cell pass temperature threadhold
+	 pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, Cells_device[threadId].CellPos.z, Cells_device[threadId].CellPos.y, 1.0f);
+	 int numActualNeigh = 0;
+	 	for (int i=0; i<NUM_NEIGHBOR;i++){//count num neighbor
+	 		if(index_device[threadId].id[i]!=INVALID_ID)
+	 			numActualNeigh++;
+	 	}
+	 Cells_device[threadId].temperature = Cells_device[threadId].temperature/2 ;
+	 float spreadval = Cells_device[threadId].temperature/numActualNeigh ;
+	 stepCellSimulation(threadId,CAMode,Cells_device,index_device,numActualNeigh,spreadval);
+
+	}
+
+}
 __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device,bool showMode)
 {
 	// __syncthreads();

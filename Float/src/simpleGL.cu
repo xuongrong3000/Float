@@ -38,13 +38,13 @@
 
 #include <cassert>
 
-#define REFRESH_DELAY     20 //ms //200 :slow  10: very fast  prefer:20
+#define REFRESH_DELAY     200 //ms //200 :slow  10: very fast  prefer:20
 
-int MAXX=64;
-int MAXY=64;
-int MAXZ=64;
+int MAXX=128;
+int MAXY=32;
+int MAXZ=128;
 
-#define SIZE 64
+#define SIZE 32
 
 /* **************** global variable for fluid dinamic    2,147,483,648  *****************
 #define DT     0.09f     // Delta T for interative solver
@@ -54,78 +54,33 @@ int MAXZ=64;
 **************************************************************/
 
 #define IX(i,j,k) ((i)+(M+2)*(j) + (M+2)*(N+2)*(k))
-#define MAX(a,b)            (((a) > (b)) ? (a) : (b))
-
-#define IX(i,j,k) ((i)+(M+2)*(j) + (M+2)*(N+2)*(k))
 #define SWAP(x0,x) {float * tmp=x0;x0=x;x=tmp;}
 #define MAX(a,b)            (((a) > (b)) ? (a) : (b))
 #define LINEARSOLVERTIMES 10
 
-
-extern void dens_step ( int M, int N, int O, float * x, float * x0, float * u, float * v, float * w, float diff, float dt );
-extern void vel_step (int M, int N, int O, float * u, float * v,  float * w, float * u0, float * v0, float * w0, float visc, float dt );
+bool drawVec = false;
 
 //fluid field information
-static int M = SIZE; // grid x
-static int N = SIZE; // grid y
-static int O = SIZE; // grid z
-static float dt = 0.4f; // time delta
-static float diff = 0.0f; // diffuse
-static float visc = 0.0f; // viscosity
-static float force = 10.0f;  // added on keypress on an axis
-static float source = 200.0f; // density
-static float source_alpha =  0.05; //for displaying density
+int M = SIZE; // grid x
+int N = SIZE; // grid y
+int O = SIZE; // grid z
+float dt = 0.4f; // time delta
+float diff = 0.0f; // diffuse
+float visc = 0.0f; // viscosity
+float force = 10.0f;  // added on keypress on an axis
+float source = 200.0f; // density
+float source_alpha =  0.05; //for displaying density
 
-static int addforce[3] = {0, 0, 0};
+int addforce[3] = {0, 0, 0};
 
 
-static float * u, * v, *w, * u_prev, * v_prev, * w_prev;
-static float * dens, * dens_prev;
+float * u, * v, *w, * u_prev, * v_prev, * w_prev;
+float * dens, * dens_prev;
 
 void add_source ( int M, int N, int O, float * x, float * s, float dt )
 {
 	int i, size=(M+2)*(N+2)*(O+2);
 	for ( i=0 ; i<size ; i++ ) x[i] += dt*s[i];
-}
-
-void  set_bnd ( int M, int N, int O, int b, float * x )
-{
-        // bounds are cells at faces of the cube
-
-	int i, j;
-
-	for ( i=1 ; i<=M ; i++ ) {
-		for ( j=1 ; j<=N ; j++ ) {
-			x[IX(i,j,0 )] = b==3 ? -x[IX(i,j,1)] : x[IX(i,j,1)];
-			x[IX(i,j,O+1)] = b==3 ? -x[IX(i,j,O)] : x[IX(i,j,O)];
-		}
-	}
-
-    for ( i=1 ; i<=N ; i++ ) {
-        for ( j=1 ; j<=O ; j++ ) {
-            x[IX(0  ,i, j)] = b==1 ? -x[IX(1,i,j)] : x[IX(1,i,j)];
-            x[IX(M+1,i, j)] = b==1 ? -x[IX(M,i,j)] : x[IX(M,i,j)];
-        }
-    }
-
-    for ( i=1 ; i<=M ; i++ ) {
-        for ( j=1 ; j<=O ; j++ ) {
-            x[IX(i,0,j )] = b==2 ? -x[IX(i,1,j)] : x[IX(i,1,j)];
-            x[IX(i,N+1,j)] = b==2 ? -x[IX(i,N,j)] : x[IX(i,N,j)];
-        }
-    }
-
-    x[IX(0  ,0, 0  )] = 1.0/3.0*(x[IX(1,0,0  )]+x[IX(0  ,1,0)]+x[IX(0 ,0,1)]);
-    x[IX(0  ,N+1, 0)] = 1.0/3.0*(x[IX(1,N+1, 0)]+x[IX(0  ,N, 0)] + x[IX(0  ,N+1, 1)]);
-
-    x[IX(M+1,0, 0 )] = 1.0/3.0*(x[IX(M,0,0  )]+x[IX(M+1,1,0)] + x[IX(M+1,0,1)]) ;
-    x[IX(M+1,N+1,0)] = 1.0/3.0*(x[IX(M,N+1,0)]+x[IX(M+1,N,0)]+x[IX(M+1,N+1,1)]);
-
-    x[IX(0  ,0, O+1 )] = 1.0/3.0*(x[IX(1,0,O+1  )]+x[IX(0  ,1,O+1)]+x[IX(0 ,0,O)]);
-    x[IX(0  ,N+1, O+1)] = 1.0/3.0*(x[IX(1,N+1, O+1)]+x[IX(0  ,N, O+1)] + x[IX(0  ,N+1, O)]);
-
-    x[IX(M+1,0, O+1 )] = 1.0/3.0*(x[IX(M,0,O+1  )]+x[IX(M+1,1,O+1)] + x[IX(M+1,0,O)]) ;
-    x[IX(M+1,N+1,O+1)] = 1.0/3.0*(x[IX(M,N+1,O+1)]+x[IX(M+1,N,O+1)]+x[IX(M+1,N+1,O)]);
 }
 
 void lin_solve ( int M, int N, int O, int b, float * x, float * x0, float a, float c )
@@ -138,7 +93,6 @@ void lin_solve ( int M, int N, int O, int b, float * x, float * x0, float a, flo
 		for ( i=1 ; i<=M ; i++ ) { for ( j=1 ; j<=N ; j++ ) { for ( k=1 ; k<=O ; k++ ) {
 			x[IX(i,j,k)] = (x0[IX(i,j,k)] + a*(x[IX(i-1,j,k)]+x[IX(i+1,j,k)]+x[IX(i,j-1,k)]+x[IX(i,j+1,k)]+x[IX(i,j,k-1)]+x[IX(i,j,k+1)]))/c;
 		}}}
-        set_bnd ( M, N, O, b, x );
 	}
 }
 
@@ -167,7 +121,6 @@ void advect (  int M, int N, int O, int b, float * d, float * d0, float * u, flo
 			s1*(t0*u0*d0[IX(i1,j0,k0)]+t1*u0*d0[IX(i1,j1,k0)]+t0*u1*d0[IX(i1,j0,k1)]+t1*u1*d0[IX(i1,j1,k1)]);
 	}}}
 
-    set_bnd (M, N, O, b, d );
 }
 
 void project ( int M, int N, int O, float * u, float * v, float * w, float * p, float * div )
@@ -179,8 +132,6 @@ void project ( int M, int N, int O, float * u, float * v, float * w, float * p, 
 		p[IX(i,j,k)] = 0;
 	}}}
 
-	set_bnd ( M, N, O, 0, div ); set_bnd (M, N, O, 0, p );
-
 	lin_solve ( M, N, O, 0, p, div, 1, 6 );
 
 	for ( i=1 ; i<=M ; i++ ) { for ( j=1 ; j<=N ; j++ ) { for ( k=1 ; k<=O ; k++ ) {
@@ -189,7 +140,6 @@ void project ( int M, int N, int O, float * u, float * v, float * w, float * p, 
 		w[IX(i,j,k)] -= 0.5f*M*(p[IX(i,j,k+1)]-p[IX(i,j,k-1)]);
 	}}}
 
-	set_bnd (  M, N, O, 1, u ); set_bnd (  M, N, O, 2, v );set_bnd (  M, N, O, 3, w);
 }
 
 void dens_step ( int M, int N, int O, float * x, float * x0, float * u, float * v, float * w, float diff, float dt )
@@ -211,8 +161,7 @@ void vel_step ( int M, int N, int O, float * u, float * v,  float * w, float * u
 	project ( M, N, O, u, v, w, u0, v0 );
 }
 
-static int allocate_data ( void )
-{
+static int allocate_fluiddata (){
 	int size = (M+2)*(N+2)*(O+2);
 
 	u			= (float *) malloc ( size*sizeof(float) );
@@ -232,8 +181,7 @@ static int allocate_data ( void )
 	return ( 1 );
 }
 
-static void get_force( float * d, float * u, float * v, float * w )
-{
+static void get_force( float * d, float * u, float * v, float * w ){
 	int i, j, k, size=(M+2)*(N+2)*(O+2);;
 
 	for ( i=0 ; i<size ; i++ ) {
@@ -277,12 +225,6 @@ static void get_force( float * d, float * u, float * v, float * w )
 	return;
 }
 
-void sim_main(void)
-{
-	get_force( dens_prev, u_prev, v_prev, w_prev );
-	vel_step ( M,N,O, u, v, w, u_prev, v_prev,w_prev, visc, dt );
-	dens_step ( M,N,O, dens, dens_prev, u, v, w, diff, dt );
-}
 
 
 bool show3D = true ;
@@ -302,9 +244,9 @@ unsigned int frameCount = 0;
 
 GLint gFramesPerSecond = 0;
 static GLint Frames = 0;         // frames averaged over 1000mS
-  static GLuint Clock;             // [milliSeconds]
-  static GLuint PreviousClock = 0; // [milliSeconds]
-  static GLuint NextClock = 0;     // [milliSeconds]
+static GLuint Clock;             // [milliSeconds]
+static GLuint PreviousClock = 0; // [milliSeconds]
+static GLuint NextClock = 0;     // [milliSeconds]
 
 void FPS(void) {
 
@@ -360,8 +302,10 @@ float4 *floatPos;
 struct cudaGraphicsResource *float_vbo_cuda_resource;
 void *d_float_vbo_buffer = NULL;
 */
-////////////////// bien toan cuc luu tru thong tin
-
+////////////////// bien toan cuc luu tru thong tin //
+/****************************************
+************   Cell & Float   ****************
+*************************************/
 bool showFloat = true;
 int num_floats = 4;
 FloatType *AllFloats_host = NULL;
@@ -393,6 +337,7 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
                unsigned int vbo_res_flags);
 void deleteVBO(GLuint *vbo, struct cudaGraphicsResource *vbo_res);
 extern __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz, int CAMode, CellType *Cells_device,Index * index_device,bool showMode);
+extern __global__ void main_simulation(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned int maxz,int CAMode, CellType *Cells_device,Index * index_device);
 
 // rendering callbacks
 void display();
@@ -403,7 +348,6 @@ void timerEvent(int value);
 void computeFPS();
 // Cuda functionality
 void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *cells_d,Index * index_device);
-
 
 void initCell2D(int CAMode){
 	long tempid = 0;
@@ -470,7 +414,7 @@ void initCell2D(int CAMode){
 				}
 	    	}
 	    }
-	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
+//	printf("\n done initCell maxid = %d , inactive=%d ",tempid,num_inactive);
 }
 
 void initCell3D(int CAMode){
@@ -487,9 +431,10 @@ void initCell3D(int CAMode){
 
 	    	  AllCells_host[index].id = tempid;
 	    	  AllCells_host[index].CellPos = temp;
+	    	  AllCells_host[index].temperature = (rand() % 1000 )/100 ;
 	    	  int state  = rand() % 200 ;
 	    //	  cout << " \ni+MAXZ*(j+MAXY*k)=  " <<i+MAXZ*(j+MAXY*k) << " tempid="<<tempid;
-	    	  if (state %4 ==0) { //Diep random init
+	    	  if (state %13 ==0) { //Diep random init
 	    		  AllCells_host[index].state = NORMAL ;
 	    	//	  cout << " \n NORMAL id = " <<tempid;
 	    	  }else {
@@ -612,12 +557,12 @@ void initFloat(){
 }
 
 void initSurface(){
-	surfacePos = (float4 *) malloc(sizeof(float4)*MAXX*MAXY);
-	for (int j=0; j<MAXY; j++){
+	surfacePos = (float4 *) malloc(sizeof(float4)*MAXX*MAXZ);
+	for (int j=0; j<MAXZ; j++){
 		for (int i=0; i<MAXX;i++){
 			float x = (float) i/MAXX ;
-			float y = (float) j/MAXY ;
-			surfacePos[j*MAXX+i] = make_float4(x, 1.0f, y, 1.0f);
+			float z = (float) j/MAXZ ;
+			surfacePos[j*MAXZ+i] = make_float4(x, 1.0f, z, 1.0f);
 		}
 	}
 
@@ -648,7 +593,7 @@ void initSurface(){
 }
 
 
-void runCudaLoop(int valueControl){
+void runCudaLoop(int valueControl){ //run 100 per second
 //	cout << " value " << ":"<< valueControl;
 	if (valueControl==0){
 		//do nothing
@@ -692,6 +637,8 @@ int main(int argc, char **argv)
 	if(showFloat){
 		initFloat();
 	}
+
+//	allocate_fluiddata ();
 
 //	int arraycellsize = MAXX*MAXY*sizeof(CellType);
 	checkCudaErrors(cudaMalloc((CellType**)&AllCells_device,arraycellsize));
@@ -741,15 +688,23 @@ int main(int argc, char **argv)
 ////////////////////////////////////////////////////////////////////////////////
 void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *Cells_device,Index *index_device)
 {
+
+	/*
+	get_force( dens_prev, u_prev, v_prev, w_prev );
+	vel_step ( M,N,O, u, v, w, u_prev, v_prev,w_prev, visc, dt );
+	dens_step ( M,N,O, dens, dens_prev, u, v, w, diff, dt );
+    */
+
     float4 *dptr;
 
     checkCudaErrors(cudaGraphicsMapResources(1, vbo_resource, 0));
     size_t num_bytes;
     checkCudaErrors(cudaGraphicsResourceGetMappedPointer((void **)&dptr, &num_bytes,
                                                          *vbo_resource));
-    dim3 block(8, 8, 1);
+    dim3 block(8, 8, 8);
 	dim3 grid(MAXX / block.x, MAXY / block.y, MAXZ/block.z);
-	game_of_life_kernel<<< grid, block>>>(dptr, MAXX,MAXY,MAXZ, modeCA,Cells_device,index_device,show3D);
+	//game_of_life_kernel<<< grid, block>>>(dptr, MAXX,MAXY,MAXZ, modeCA,Cells_device,index_device,show3D);
+	main_simulation<<< grid, block>>>(dptr, MAXX,MAXY,MAXZ, modeCA,Cells_device,index_device);
 
     checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
 }
@@ -775,11 +730,39 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
     SDK_CHECK_ERROR_GL();
 }
 
+static void draw_velocity (){
+	int i, j, k;
+	float x, y, z, h;
+
+	h = 1.0f/MAX(MAX(M, N), MAX(N, O));
+
+	glColor3f ( 0.5f, 0.5f, 0.5f );
+	glLineWidth ( 1.0f );
+
+	glBegin ( GL_LINES );
+
+	for ( i=1; i<=M; i++ ) {
+		x = (i-0.5f)*h;
+		for ( j=1; j<=N; j++ ) {
+			y = (j-0.5f)*h;
+			for ( k=1; k<=O; k++ ) {
+				z = (k-0.5f)*h;
+
+				glVertex3f ( x, y, z );
+				glVertex3f ( x+u[IX(i,j,k)], y+v[IX(i,j,k)], z+w[IX(i,j,k)] );
+			}
+		}
+	}
+
+	glEnd ();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //! Display callback
 ////////////////////////////////////////////////////////////////////////////////
 void display()
 {
+
 //	cout<<"\n average time = "<<sdkGetAverageTimerValue(&timer) / 1000.f ;
 /*
    if (sdkGetAverageTimerValue(&timer)>0.1) {
@@ -819,7 +802,7 @@ void display()
     if(showSurface){
     	glGenBuffers(1, &surfaceVBO);
 		glBindBuffer(GL_ARRAY_BUFFER, surfaceVBO);
-		unsigned int size = MAXX * MAXY  * 4 * sizeof(float);
+		unsigned int size = MAXX * MAXZ  * 4 * sizeof(float);
 		glBufferData(GL_ARRAY_BUFFER, size, surfacePos, GL_STATIC_DRAW);
 
    // 	glBindBuffer(GL_ARRAY_BUFFER, surfaceVBO);
@@ -827,7 +810,7 @@ void display()
 
 		glEnableClientState(GL_VERTEX_ARRAY);
 		glColor4f(0.0, 0.0, 1.0f,1.0f);
-		glDrawArrays(GL_POINTS, 0, MAXX*MAXY);
+		glDrawArrays(GL_POINTS, 0, MAXX*MAXZ);
 		glDisableClientState(GL_VERTEX_ARRAY);
 
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -856,6 +839,25 @@ void display()
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
     	}
     }
+
+    //show sample vertical z color red
+//    float4 *verticalPos;
+//	unsigned int versize = 256 * sizeof(float);
+	//verticalPos = (float4*) malloc (versize);
+ /*   for(int k=0; k< 256; k++){
+    	float z = (float)k/256;
+    	glPointSize(3.0f);
+    	glBegin (GL_POINTS);
+    	glVertex3f (0.5,z,0.5 );
+    	glColor3f (z,0,0);
+    	glEnd();
+    }
+
+
+
+    if(drawVec) draw_velocity ();
+*/
+
   //  glColor3f(1.0,0.0,0.0);
   //	glLoadIdentity();
  //	glutWireSphere( 0.05, 8, 4);

@@ -1,22 +1,11 @@
-////////////////////////////////////////////////////////////////////////////
-//
-//
-//
-////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////
+// NGUYEN Ba Diep 13/03/2017   //
+// xuongrong3000@gmail.com	   //
+// class simpleGL.cu           //
+/////////////////////////////////
 
 /*
-    This example demonstrates how to use the Cuda OpenGL bindings to
-    dynamically modify a vertex buffer using a Cuda kernel.
 
-    The steps are:
-    1. Create an empty vertex buffer object (VBO)
-    2. Register the VBO with Cuda
-    3. Map the VBO for writing from Cuda
-    4. Run Cuda kernel to modify the vertex positions
-    5. Unmap the VBO
-    6. Render the results using OpenGL
-
-    Host code
 */
 
 // includes, system
@@ -49,13 +38,11 @@
 
 #include <cassert>
 
-#define REFRESH_DELAY     10 //ms //200 :slow  10: very fast
+#define REFRESH_DELAY     20 //ms //200 :slow  10: very fast  prefer:20
 
-int MAXX=32;
-int MAXY=32;
-int MAXZ=32;
-
-
+int MAXX=64;
+int MAXY=64;
+int MAXZ=64;
 
 /*          2,147,483,648
 #define DT     0.09f     // Delta T for interative solver
@@ -85,7 +72,6 @@ static GLint Frames = 0;         // frames averaged over 1000mS
   static GLuint NextClock = 0;     // [milliSeconds]
 
 void FPS(void) {
-
 
   ++Frames;
   Clock = glutGet(GLUT_ELAPSED_TIME); //has limited resolution, so average over 1000mS
@@ -390,7 +376,6 @@ void initFloat(){
 	}
 }
 
-
 void initSurface(){
 	surfacePos = (float4 *) malloc(sizeof(float4)*MAXX*MAXY);
 	for (int j=0; j<MAXY; j++){
@@ -473,7 +458,6 @@ int main(int argc, char **argv)
 		initFloat();
 	}
 
-
 //	int arraycellsize = MAXX*MAXY*sizeof(CellType);
 	checkCudaErrors(cudaMalloc((CellType**)&AllCells_device,arraycellsize));
 	checkCudaErrors(cudaMemcpy(AllCells_device, AllCells_host, arraycellsize, cudaMemcpyHostToDevice));
@@ -532,7 +516,6 @@ void runCuda(struct cudaGraphicsResource **vbo_resource,int modeCA,CellType *Cel
 	dim3 grid(MAXX / block.x, MAXY / block.y, MAXZ/block.z);
 	game_of_life_kernel<<< grid, block>>>(dptr, MAXX,MAXY,MAXZ, modeCA,Cells_device,index_device,show3D);
 
-    // unmap buffer object
     checkCudaErrors(cudaGraphicsUnmapResources(1, vbo_resource, 0));
 }
 
@@ -544,18 +527,14 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
 {
     assert(vbo);
 
-    // create buffer object
     glGenBuffers(1, vbo);
     glBindBuffer(GL_ARRAY_BUFFER, *vbo);
-
-    // initialize buffer object
 
     unsigned int size = MAXX * MAXY * MAXZ  * 4 * sizeof(float);
     glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    // register this buffer object with CUDA
     checkCudaErrors(cudaGraphicsGLRegisterBuffer(vbo_res, *vbo, vbo_res_flags));
 
     SDK_CHECK_ERROR_GL();
@@ -567,11 +546,12 @@ void createVBO(GLuint *vbo, struct cudaGraphicsResource **vbo_res,
 void display()
 {
 //	cout<<"\n average time = "<<sdkGetAverageTimerValue(&timer) / 1000.f ;
-/*	if (sdkGetAverageTimerValue(&timer)>0.1) {
+/*
+   if (sdkGetAverageTimerValue(&timer)>0.1) {
 		sdkStopTimer(&timer);sdkStartTimer(&timer);
 		return;
 	}
-	*/
+*/
 
     sdkStartTimer(&timer);
 
@@ -585,14 +565,12 @@ void display()
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // set view matrix
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glTranslatef(0.0, 0.0, translate_z);
     glRotatef(rotate_x, 1.0, 0.0, 0.0);
     glRotatef(rotate_y, 0.0, 1.0, 0.0);
 
-    // render from the vbo
     if(showCell) {
 		glPointSize(3.0f);
 		glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -671,10 +649,7 @@ void timerEvent(int value)
 ////////////////////////////////////////////////////////////////////////////////
 void deleteVBO(GLuint *vbo, struct cudaGraphicsResource *vbo_res)
 {
-
-    // unregister this buffer object with CUDA
     checkCudaErrors(cudaGraphicsUnregisterResource(vbo_res));
-
     glBindBuffer(1, *vbo);
     glDeleteBuffers(1, vbo);
 
@@ -690,17 +665,6 @@ void cleanup()
         deleteVBO(&vbo, cuda_vbo_resource);
     }
 
-  /*  if (float_vbo)
-	{
-		deleteVBO(&float_vbo, float_vbo_cuda_resource);
-	}
- */
-
-    // cudaDeviceReset causes the driver to clean up all state. While
-    // not mandatory in normal operation, it is good practice.  It is also
-    // needed to ensure correct operation when the application is being
-    // profiled. Calling cudaDeviceReset causes all profile data to be
-    // flushed before the application exits
     cudaDeviceReset();
 
     cudaFree(AllFloats_device);
@@ -753,7 +717,6 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
 	    	showSurface = !showSurface;
 	    	break;
     }
-    // indicate the display must be redrawn
      glutPostRedisplay();
 }
 
@@ -838,9 +801,7 @@ bool initGL(int *argc, char **argv)
         return false;
     }
 
-    // default initialization
     glClearColor(0.0, 0.0, 0.0, 1.0);
- //   glDisable(GL_DEPTH_TEST);
 
     // Enable depth test
     glEnable(GL_DEPTH_TEST);
@@ -850,10 +811,8 @@ bool initGL(int *argc, char **argv)
     glEnable(GL_BLEND); //enable alpha color
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//enable alpha color
 
-    // viewport
     glViewport(0, 0, window_width, window_height);
 
-    // projection
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     gluPerspective(60.0, (GLfloat)window_width / (GLfloat) window_height, 0.1, 10.0);

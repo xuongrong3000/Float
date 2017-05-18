@@ -1,16 +1,16 @@
+////////////////////////////////////
+// NGUYEN Ba Diep 13/03/2017	  //
+// xuongrong3000@gmail.com		  //
+// class kernel.cu				  //
+////////////////////////////////////
 #include "defines.h"
-
-
-//void initFloatState(FloatState *node_state, int node_number, int num_starting_float);
-
-//extern __device__ TreeState computeStateForest(TreeState *nowState_d, int nodeIndex, canaux *channels_d, curandState* devState_d);
 
 __global__ void runfloat(float4 *pos, unsigned int maxx,unsigned int maxy, unsigned maxz, int CAMode, CellType *Cells_device,Index * index_device)
 {
 
 }
 
-__device__ void stepCell(unsigned long long int idx, int CAMode, CellType *Cells_device,Index * index_device,bool showMode){
+__device__ void stepCellGameOfLife(unsigned long long int idx, int CAMode, CellType *Cells_device,Index * index_device,bool showMode){
 //	pos[y*mesh_width+x] = make_float4(0,0,0,1.0f); ||(!showMode&&i<4)
 	for (int i=0; i<NUM_NEIGHBOR;i++){
 		if(index_device[idx].id[i]!=INVALID_ID)
@@ -41,7 +41,7 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int 
 											+ (threadIdx.z * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
 		if(Cells_device[threadId].state == INACTIVE ){
 	     	pos[threadId] = make_float4(0,0,0,1.0f);
-	     	stepCell(threadId,CAMode,Cells_device,index_device,showMode);
+	     	stepCellGameOfLife(threadId,CAMode,Cells_device,index_device,showMode);
 		}else{
 		 pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, Cells_device[threadId].CellPos.z, Cells_device[threadId].CellPos.y, 1.0f);
 		 Cells_device[threadId].state = INACTIVE;
@@ -53,7 +53,7 @@ __global__ void game_of_life_kernel(float4 *pos, unsigned int maxx,unsigned int 
 
 		if(Cells_device[threadId].state == INACTIVE ){
 			pos[threadId] = make_float4(0,0,0,1.0f);
-			stepCell(threadId,CAMode,Cells_device,index_device,showMode);
+			stepCellGameOfLife(threadId,CAMode,Cells_device,index_device,showMode);
 		}else{
 			pos[threadId] = make_float4(Cells_device[threadId].CellPos.x, 0.5f, Cells_device[threadId].CellPos.y, 1.0f);
 			Cells_device[threadId].state = INACTIVE;
@@ -111,15 +111,4 @@ __global__ void simple_conveyor_kernel(float4 *pos, unsigned int mesh_width,unsi
 		  pos[y*mesh_width+x] = make_float4(u, 1.0f, v, 1.0f);
 	}
 }
-/*
-extern __global__ void setup_kernel(curandState *state, unsigned long seed);
-
-__global__ void setup_kernel ( curandState * state, unsigned long seed )
-{
-    int id = threadIdx.x;
-    curand_init ( seed, id, 0, &state[id] );
-}
-
-*/
-//Randomly firing some places
 

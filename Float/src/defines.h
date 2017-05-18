@@ -1,4 +1,8 @@
-
+////////////////////////////////////
+// NGUYEN Ba Diep 13/03/2017	  //
+// xuongrong3000@gmail.com		  //
+// class defines.h				  //
+////////////////////////////////////
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
